@@ -121,6 +121,13 @@ def generate_image(account_id: str, api_token: str, prompt: str) -> tuple[bytes,
             details = exc.read().decode("utf-8", errors="replace").strip()
             if len(details) > 500:
                 details = details[:500] + "..."
+            if exc.code == 429 and (
+                '"code":4006' in details or "daily free allocation" in details
+            ):
+                raise RuntimeError(
+                    "Cloudflare Workers AI daily allocation is exhausted. "
+                    "Retry after the daily reset or enable Workers Paid."
+                ) from exc
             if exc.code == 400 and "NSFW content" in details and not used_safety_fallback:
                 active_prompt = SAFETY_FALLBACK_PROMPT
                 used_safety_fallback = True
