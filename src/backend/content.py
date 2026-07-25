@@ -49,7 +49,8 @@ The description should be two calm sentences. Hashtags should contain 4-6 releva
 separated by spaces. Return JSON only."""
 
     try:
-        response = genai.Client(api_key=api_key).models.generate_content(
+        client = genai.Client(api_key=api_key)
+        response = client.models.generate_content(
             model=MODEL,
             contents=prompt,
             config=types.GenerateContentConfig(
