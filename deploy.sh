@@ -1,8 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REMOTE_HOST="administrator@69.197.164.87"
-REMOTE_DIR="/home/administrator/sleep-doc-pipeline"
+# Runs on the dedicated GitHub Actions runner installed on the VPS.
+SOURCE_DIR="${GITHUB_WORKSPACE:-$(pwd)}"
+DEPLOY_DIR="${STUDIO_DEPLOY_DIR:-/home/administrator/sleep-doc-pipeline}"
+
+mkdir -p \
+  "${DEPLOY_DIR}/data" \
+  "${DEPLOY_DIR}/audio" \
+  "${DEPLOY_DIR}/images" \
+  "${DEPLOY_DIR}/scripts" \
+  "${DEPLOY_DIR}/videos"
 
 rsync -az --delete \
   --exclude '.env' \
@@ -15,12 +23,21 @@ rsync -az --delete \
   --exclude 'images/' \
   --exclude 'scripts/' \
   --exclude 'videos/' \
-  ./ "${REMOTE_HOST}:${REMOTE_DIR}/"
+  "${SOURCE_DIR}/" "${DEPLOY_DIR}/"
 
-ssh "${REMOTE_HOST}" "cd '${REMOTE_DIR}' && docker compose up -d --build --remove-orphans --wait"
+if [[ -z "${STUDIO_ENV_FILE:-}" ]]; then
+  echo "STUDIO_ENV_FILE GitHub secret is missing." >&2
+  exit 1
+fi
 
-# Remove only unused Docker artifacts. Persistent volumes and application data
-# are deliberately excluded.
-ssh "${REMOTE_HOST}" "docker image prune -a -f && docker builder prune -a -f --filter 'until=24h'"
+umask 077
+printf '%s\n' "${STUDIO_ENV_FILE}" > "${DEPLOY_DIR}/.env"
 
-ssh "${REMOTE_HOST}" "curl -fsS http://127.0.0.1:8090/health"
+cd "${DEPLOY_DIR}"
+docker compose up -d --build --remove-orphans --wait
+curl --fail --silent --show-error http://127.0.0.1:8090/health
+
+# Keep active containers and persistent files. Remove only unused Docker
+# artifacts older than 24 hours so deployments cannot fill the VPS disk.
+docker image prune -a -f --filter "until=24h"
+docker builder prune -a -f --filter "until=24h"

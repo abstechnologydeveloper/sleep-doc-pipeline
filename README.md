@@ -36,6 +36,18 @@ Social posting uses official platform APIs. Each connector remains in
 are configured. TikTok requires Content Posting API approval; Instagram
 requires a Professional account linked to a Facebook Page.
 
+### GitHub Actions deployment
+
+Production deployment runs only through `.github/workflows/deploy.yml` on a
+dedicated self-hosted runner carrying the `sleep-studio` label. Add a repository
+secret named `STUDIO_ENV_FILE` containing the complete production `.env` file.
+
+The workflow runs only when manually started from the GitHub Actions page. It
+validates the Python source, deploys with Docker Compose, checks `/health`, and
+removes unused Docker images/build cache older than 24 hours. It never prunes
+Docker volumes, and the deployment script excludes the database, uploads,
+generated scripts, audio, images, and videos from rsync deletion.
+
 ## Requirements
 
 - Python 3.12 with the existing project dependencies

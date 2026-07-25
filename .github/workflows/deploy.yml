@@ -1,0 +1,41 @@
+name: Deploy Sleep Studio
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: sleep-studio-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: python -m compileall -q admin *.py
+
+  deploy:
+    needs: validate
+    runs-on: [self-hosted, Linux, X64, sleep-studio]
+    timeout-minutes: 30
+    environment: production
+    env:
+      STUDIO_ENV_FILE: ${{ secrets.STUDIO_ENV_FILE }}
+      STUDIO_DEPLOY_DIR: /home/administrator/sleep-doc-pipeline
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          clean: true
+      - name: Deploy and clean old Docker artifacts
+        run: ./deploy.sh
+      - name: Show service status
+        if: always()
+        run: docker compose --project-directory /home/administrator/sleep-doc-pipeline ps
