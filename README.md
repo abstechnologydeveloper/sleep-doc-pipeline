@@ -41,6 +41,8 @@ requires a Professional account linked to a Facebook Page.
 Production deployment runs only through `.github/workflows/deploy.yml` on a
 dedicated self-hosted runner carrying the `sleep-studio` label. Add a repository
 secret named `STUDIO_ENV_FILE` containing the complete production `.env` file.
+If that secret is not configured, deployment preserves and uses the existing
+`.env` file in the VPS deployment directory.
 
 The workflow runs only when manually started from the GitHub Actions page. It
 validates the Python source, deploys with Docker Compose, checks `/health`, and

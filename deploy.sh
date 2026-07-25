@@ -25,13 +25,13 @@ rsync -az --delete \
   --exclude 'videos/' \
   "${SOURCE_DIR}/" "${DEPLOY_DIR}/"
 
-if [[ -z "${STUDIO_ENV_FILE:-}" ]]; then
-  echo "STUDIO_ENV_FILE GitHub secret is missing." >&2
+if [[ -n "${STUDIO_ENV_FILE:-}" ]]; then
+  umask 077
+  printf '%s\n' "${STUDIO_ENV_FILE}" > "${DEPLOY_DIR}/.env"
+elif [[ ! -s "${DEPLOY_DIR}/.env" ]]; then
+  echo "Neither STUDIO_ENV_FILE nor an existing deployment .env is available." >&2
   exit 1
 fi
-
-umask 077
-printf '%s\n' "${STUDIO_ENV_FILE}" > "${DEPLOY_DIR}/.env"
 
 cd "${DEPLOY_DIR}"
 docker compose up -d --build --remove-orphans --wait
