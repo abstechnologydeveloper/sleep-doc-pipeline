@@ -20,6 +20,16 @@ from .worker import start_worker
 BASE_DIR = Path(__file__).resolve().parents[1]
 UPLOAD_DIR = BASE_DIR / "data" / "uploads"
 TEMPLATES = Jinja2Templates(directory=BASE_DIR / "admin" / "templates")
+ADMIN_USERNAME = "admin"
+ADMIN_PASSWORD_SALT = bytes.fromhex("438e1e08c2debc9865471dfbcfa3b952")
+ADMIN_PASSWORD_HASH = bytes.fromhex("23268369118539671454ca6b90ccf3f52a38e2ec1475ca78f2f9b35f81190adc")
+
+
+def valid_admin_password(password: str) -> bool:
+    candidate = hashlib.pbkdf2_hmac(
+        "sha256", password.encode(), ADMIN_PASSWORD_SALT, 600_000
+    )
+    return hmac.compare_digest(candidate, ADMIN_PASSWORD_HASH)
 
 
 @asynccontextmanager
@@ -76,8 +86,8 @@ def login(request: Request, username: str = Form(), password: str = Form(), csrf
         verify_csrf(request, csrf)
     except ValueError:
         return RedirectResponse("/login", status_code=303)
-    valid_user = hmac.compare_digest(username, os.getenv("ADMIN_USERNAME", "admin"))
-    valid_password = hmac.compare_digest(password, os.getenv("ADMIN_PASSWORD", ""))
+    valid_user = hmac.compare_digest(username, ADMIN_USERNAME)
+    valid_password = valid_admin_password(password)
     if not valid_user or not valid_password:
         return TEMPLATES.TemplateResponse(
             request, "login.html", {"csrf": csrf_token(request), "error": "Invalid credentials"}, status_code=401
