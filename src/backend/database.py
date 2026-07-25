@@ -99,7 +99,7 @@ def list_jobs(limit: int = 100):
 def list_job_statuses(limit: int = 100) -> list[dict]:
     with connect() as db:
         rows = db.execute(
-            """SELECT id, status, video_path, updated_at
+            """SELECT id, status, title, video_path, updated_at
             FROM jobs ORDER BY id DESC LIMIT ?""",
             (limit,),
         ).fetchall()
@@ -134,7 +134,10 @@ def claim_job():
 
 
 def update_job(job_id: int, status: str, **fields) -> None:
-    allowed = {"video_path", "log_path", "error"}
+    allowed = {
+        "topic", "title", "description", "hashtags",
+        "video_path", "log_path", "error",
+    }
     updates = {key: value for key, value in fields.items() if key in allowed}
     updates.update(status=status, updated_at=utc_now())
     assignments = ", ".join(f"{key} = ?" for key in updates)

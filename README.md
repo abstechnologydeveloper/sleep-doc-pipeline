@@ -14,8 +14,9 @@ manual video uploads, scheduling, and multi-platform publishing status.
 
 The dashboard provides two workflows:
 
-- **Automatic:** enter a topic and duration, generate the complete video, then
-  queue it for selected platforms.
+- **Automatic:** keep the default duration and leave the content fields blank
+  to generate the topic, title, description, hashtags, and complete video, then
+  optionally queue it for selected platforms.
 - **Manual:** upload an existing MP4/MOV, add post metadata, and queue it for
   YouTube, Facebook, Instagram, and TikTok.
 

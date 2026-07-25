@@ -10,6 +10,7 @@ from pathlib import Path
 from project_paths import DATA_DIR, PROJECT_ROOT, VIDEOS_DIR
 
 from . import database
+from .content import generate_post_metadata
 from .publishers import publish
 
 
@@ -52,12 +53,25 @@ def run_automatic(job, log_file) -> Path:
 
 
 def process_job(job) -> None:
+    job = dict(job)
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     log_path = LOG_DIR / f"job_{job['id']}.log"
     database.update_job(job["id"], "processing", log_path=str(log_path))
     try:
         with log_path.open("a", encoding="utf-8") as log_file:
             if job["kind"] == "automatic":
+                print("Preparing topic and post metadata...", file=log_file, flush=True)
+                metadata = generate_post_metadata(
+                    topic=job["topic"] or "",
+                    title=job["title"] or "",
+                    description=job["description"] or "",
+                    hashtags=job["hashtags"] or "",
+                )
+                if database.cancellation_requested(job["id"]):
+                    raise JobCancelled
+                job.update(metadata)
+                database.update_job(job["id"], "processing", **metadata)
+                print(f"Topic: {job['topic']}", file=log_file, flush=True)
                 video_path = run_automatic(job, log_file)
             else:
                 video_path = Path(job["source_path"])

@@ -94,6 +94,7 @@ async def job_updates(websocket: WebSocket):
                         {
                             "id": job["id"],
                             "status": job["status"],
+                            "title": job["title"],
                             "video_ready": bool(
                                 job["video_path"] and Path(job["video_path"]).is_file()
                             ),
@@ -171,11 +172,12 @@ async def automatic_job(request: Request):
     verify_csrf(request, str(form.get("csrf", "")))
     topic = str(form.get("topic", "")).strip()
     minutes = float(str(form.get("minutes", "1")))
-    if not topic or minutes <= 0:
-        raise ValueError("Topic and positive duration are required")
+    if minutes <= 0:
+        raise ValueError("A positive duration is required")
     job_id = database.create_job(
         kind="automatic", topic=topic, minutes=minutes,
-        title=str(form.get("title") or topic), description=str(form.get("description", "")),
+        title=str(form.get("title", "")).strip(),
+        description=str(form.get("description", "")).strip(),
         hashtags=str(form.get("hashtags", "")), platforms=selected_platforms(form),
         scheduled_at=normalized_schedule(str(form.get("scheduled_at", ""))),
     )

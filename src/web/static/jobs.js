@@ -27,6 +27,8 @@
         }
         const badge = item.row.querySelector("td:nth-child(4) .badge");
         if (badge) badge.textContent = job.status;
+        const title = item.row.querySelector("td:nth-child(3)");
+        if (title) title.textContent = job.title || "Auto-generating…";
       }
 
       if (detailId) {
@@ -37,6 +39,8 @@
         }
         const status = document.querySelector("dl dd:first-of-type");
         if (status) status.textContent = job.status;
+        const details = document.querySelectorAll("dl dd");
+        if (details[2] && job.title) details[2].textContent = job.title;
         if (job.video_ready && !document.querySelector("video")) location.reload();
       }
     });
