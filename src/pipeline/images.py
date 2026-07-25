@@ -32,6 +32,11 @@ STYLE_SUFFIX = (
     ", calm atmospheric lighting, soft muted colors, cinematic wide shot, "
     "no text, no watermark, high detail"
 )
+SAFETY_FALLBACK_PROMPT = (
+    "A peaceful empty landscape beneath a starlit night sky, gentle moonlight, "
+    "quiet trees and distant hills, calm atmospheric lighting, soft muted colors, "
+    "cinematic wide shot, no people, no text, no watermark, high detail"
+)
 
 
 def split_into_scenes(text: str, words_per_scene: int = WORDS_PER_SCENE) -> list[str]:
@@ -104,14 +109,21 @@ def request_image(account_id: str, api_token: str, prompt: str) -> tuple[bytes, 
 
 def generate_image(account_id: str, api_token: str, prompt: str) -> tuple[bytes, str]:
     last_error = None
+    active_prompt = prompt
+    used_safety_fallback = False
 
     for attempt in range(1, MAX_RETRIES + 1):
         try:
-            return request_image(account_id, api_token, prompt)
+            return request_image(account_id, api_token, active_prompt)
         except error.HTTPError as exc:
             details = exc.read().decode("utf-8", errors="replace").strip()
             if len(details) > 500:
                 details = details[:500] + "..."
+            if exc.code == 400 and "NSFW content" in details and not used_safety_fallback:
+                active_prompt = SAFETY_FALLBACK_PROMPT
+                used_safety_fallback = True
+                print("    Cloudflare rejected the scene prompt; retrying with a neutral visual.")
+                continue
             if exc.code not in {408, 409, 429, 500, 502, 503, 504}:
                 raise RuntimeError(
                     f"Cloudflare rejected the request ({exc.code}): {details}"
