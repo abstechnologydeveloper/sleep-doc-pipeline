@@ -30,10 +30,11 @@ then start the dashboard:
 docker compose up -d --build
 ```
 
-The service listens on port `8090`. Set `COOKIE_SECURE=false` when accessing it
-directly by IP, or `COOKIE_SECURE=true` when it sits behind an HTTPS reverse
-proxy. SQLite state, uploads, and generated media are bind-mounted so container
-replacement does not erase them.
+The production dashboard is available at
+`https://sleep-studio.69.197.164.87.nip.io`. Nginx terminates HTTPS and proxies
+to port `8090`, which is bound to localhost so it cannot bypass TLS. Use
+`COOKIE_SECURE=true`. SQLite state, uploads, and generated media are
+bind-mounted so container replacement does not erase them.
 
 Social posting uses official platform APIs. Each connector remains in
 `waiting_for_connections` until its approved OAuth app and account identifiers
