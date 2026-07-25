@@ -12,14 +12,15 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import database
-from .publishers import PLATFORMS, connector_statuses
-from .worker import start_worker
+from backend import database
+from backend.publishers import PLATFORMS, connector_statuses
+from backend.worker import start_worker
+from project_paths import DATA_DIR
 
 
-BASE_DIR = Path(__file__).resolve().parents[1]
-UPLOAD_DIR = BASE_DIR / "data" / "uploads"
-TEMPLATES = Jinja2Templates(directory=BASE_DIR / "admin" / "templates")
+WEB_DIR = Path(__file__).resolve().parent
+UPLOAD_DIR = DATA_DIR / "uploads"
+TEMPLATES = Jinja2Templates(directory=WEB_DIR / "templates")
 ADMIN_USERNAME = "admin"
 ADMIN_PASSWORD_SALT = bytes.fromhex("438e1e08c2debc9865471dfbcfa3b952")
 ADMIN_PASSWORD_HASH = bytes.fromhex("23268369118539671454ca6b90ccf3f52a38e2ec1475ca78f2f9b35f81190adc")
@@ -48,7 +49,7 @@ app.add_middleware(
     https_only=os.getenv("COOKIE_SECURE", "false").lower() == "true",
     same_site="lax",
 )
-app.mount("/static", StaticFiles(directory=BASE_DIR / "admin" / "static"), name="static")
+app.mount("/static", StaticFiles(directory=WEB_DIR / "static"), name="static")
 
 
 def authenticated(request: Request) -> bool:

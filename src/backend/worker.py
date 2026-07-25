@@ -7,12 +7,14 @@ import threading
 import time
 from pathlib import Path
 
+from project_paths import DATA_DIR, PROJECT_ROOT, VIDEOS_DIR
+
 from . import database
 from .publishers import publish
 
 
-BASE_DIR = Path(__file__).resolve().parents[1]
-LOG_DIR = BASE_DIR / "data" / "logs"
+BASE_DIR = PROJECT_ROOT
+LOG_DIR = DATA_DIR / "logs"
 
 
 class JobCancelled(Exception):
@@ -20,14 +22,14 @@ class JobCancelled(Exception):
 
 
 def newest_video(before: set[Path]) -> Path:
-    candidates = [p for p in (BASE_DIR / "videos").glob("*.mp4") if p not in before]
+    candidates = [p for p in VIDEOS_DIR.glob("*.mp4") if p not in before]
     if not candidates:
         raise RuntimeError("Pipeline completed without producing a new video")
     return max(candidates, key=lambda path: path.stat().st_mtime_ns)
 
 
 def run_automatic(job, log_file) -> Path:
-    existing = set((BASE_DIR / "videos").glob("*.mp4"))
+    existing = set(VIDEOS_DIR.glob("*.mp4"))
     process = subprocess.Popen(
         [sys.executable, str(BASE_DIR / "run_pipeline.py"), job["topic"], str(job["minutes"])],
         cwd=BASE_DIR, stdout=log_file, stderr=subprocess.STDOUT, start_new_session=True,

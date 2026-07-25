@@ -19,8 +19,8 @@ The dashboard provides two workflows:
 - **Manual:** upload an existing MP4/MOV, add post metadata, and queue it for
   YouTube, Facebook, Instagram, and TikTok.
 
-Copy `.env.example` to `.env`, set strong admin credentials and API keys, then
-start the dashboard:
+Copy `.env.example` to `.env`, set the API keys and a strong session secret,
+then start the dashboard:
 
 ```bash
 docker compose up -d --build
@@ -71,6 +71,27 @@ CLOUDFLARE_API_TOKEN=your_workers_ai_api_token
 ```
 
 Do not commit `.env` or share its contents.
+
+## Project layout
+
+```text
+src/
+  pipeline/   Script, audio, image, video, and orchestration implementation
+  backend/    Database, background worker, and publishing integrations
+  web/        FastAPI routes, templates, and static assets
+  project_paths.py   Shared locations for persistent and generated files
+
+run_pipeline.py      Stable command-line entry point
+generate_script.py   Stable script-generation entry point
+generate_audio.py    Stable narration entry point
+generate_images.py   Stable image-generation entry point
+assemble_video.py    Stable video-assembly entry point
+
+data/ scripts/ audio/ images/ videos/   Persistent runtime output
+```
+
+Implementation code lives under `src/`. The small root entry points preserve
+the existing terminal commands and keep runtime output outside the source tree.
 
 This repository's `venv` is currently an empty Python 3.14 environment. Use the
 configured Python 3.12 interpreter in the commands below:

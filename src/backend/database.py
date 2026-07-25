@@ -2,10 +2,9 @@ import json
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timezone
-from pathlib import Path
+from project_paths import DATA_DIR
 
 
-DATA_DIR = Path(__file__).resolve().parents[1] / "data"
 DATABASE_PATH = DATA_DIR / "admin.sqlite3"
 
 

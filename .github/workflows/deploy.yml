@@ -15,7 +15,7 @@ jobs:
     runs-on: [self-hosted, Linux, X64, sleep-studio]
     steps:
       - uses: actions/checkout@v4
-      - run: python3 -m compileall -q admin *.py
+      - run: python3 -m compileall -q src *.py
 
   deploy:
     needs: validate
