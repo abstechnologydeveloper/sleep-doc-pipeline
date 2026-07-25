@@ -15,7 +15,14 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from project_paths import AUDIO_DIR, IMAGES_DIR, PROJECT_ROOT, SCRIPTS_DIR, VIDEOS_DIR
+from project_paths import (
+    AUDIO_DIR,
+    IMAGES_DIR,
+    PROJECT_ROOT,
+    SCRIPTS_DIR,
+    THUMBNAILS_DIR,
+    VIDEOS_DIR,
+)
 
 BASE_DIR = PROJECT_ROOT
 PIPELINE_STEPS = (
@@ -41,6 +48,11 @@ def parse_args() -> argparse.Namespace:
         "--resume",
         action="store_true",
         help="Resume the newest script instead of generating a new one",
+    )
+    parser.add_argument(
+        "--title",
+        default="",
+        help="Optional post title used to create the video thumbnail",
     )
     args = parser.parse_args()
     if args.resume and (args.topic is not None or args.minutes is not None):
@@ -189,7 +201,13 @@ def main() -> None:
     )
     run_step(
         "4/4 Assembling captioned video",
-        [python, str(BASE_DIR / "assemble_video.py"), str(script_path)],
+        [
+            python,
+            str(BASE_DIR / "assemble_video.py"),
+            str(script_path),
+            "--title",
+            args.title,
+        ],
     )
 
     video_path = VIDEOS_DIR / f"{script_path.stem}.mp4"
@@ -201,6 +219,7 @@ def main() -> None:
     print(f"Audio:  {audio_path}")
     print(f"Images: {IMAGES_DIR / script_path.stem}")
     print(f"Video:  {video_path}")
+    print(f"Thumb:  {THUMBNAILS_DIR / f'{script_path.stem}.jpg'}")
 
 
 if __name__ == "__main__":

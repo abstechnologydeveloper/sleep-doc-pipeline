@@ -10,7 +10,8 @@ mkdir -p \
   "${DEPLOY_DIR}/audio" \
   "${DEPLOY_DIR}/images" \
   "${DEPLOY_DIR}/scripts" \
-  "${DEPLOY_DIR}/videos"
+  "${DEPLOY_DIR}/videos" \
+  "${DEPLOY_DIR}/thumbnails"
 
 rsync -az --delete \
   --exclude '.env' \
@@ -23,6 +24,7 @@ rsync -az --delete \
   --exclude 'images/' \
   --exclude 'scripts/' \
   --exclude 'videos/' \
+  --exclude 'thumbnails/' \
   "${SOURCE_DIR}/" "${DEPLOY_DIR}/"
 
 if [[ -n "${STUDIO_ENV_FILE:-}" ]]; then
@@ -36,7 +38,7 @@ fi
 cd "${DEPLOY_DIR}"
 docker compose build
 docker compose run --rm --no-deps --user root --entrypoint chown studio \
-  studio:studio /app/data /app/scripts /app/audio /app/images /app/videos
+  studio:studio /app/data /app/scripts /app/audio /app/images /app/videos /app/thumbnails
 docker compose up -d --no-build --remove-orphans --wait
 curl --fail --silent --show-error http://127.0.0.1:8090/health
 

@@ -32,7 +32,14 @@ def newest_video(before: set[Path]) -> Path:
 def run_automatic(job, log_file) -> Path:
     existing = set(VIDEOS_DIR.glob("*.mp4"))
     process = subprocess.Popen(
-        [sys.executable, str(BASE_DIR / "run_pipeline.py"), job["topic"], str(job["minutes"])],
+        [
+            sys.executable,
+            str(BASE_DIR / "run_pipeline.py"),
+            job["topic"],
+            str(job["minutes"]),
+            "--title",
+            job["title"],
+        ],
         cwd=BASE_DIR, stdout=log_file, stderr=subprocess.STDOUT, start_new_session=True,
     )
     while process.poll() is None:

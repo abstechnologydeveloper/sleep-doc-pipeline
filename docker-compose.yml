@@ -12,6 +12,7 @@ services:
       - ./audio:/app/audio
       - ./images:/app/images
       - ./videos:/app/videos
+      - ./thumbnails:/app/thumbnails
     security_opt:
       - no-new-privileges:true
     healthcheck:

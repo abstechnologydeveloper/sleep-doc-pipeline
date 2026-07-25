@@ -5,7 +5,8 @@ This project generates a complete narrated sleep-story video:
 1. Gemini writes the narration script.
 2. Gemini TTS creates the voice narration.
 3. Cloudflare Workers AI FLUX.1 Schnell creates the scene images.
-4. FFmpeg assembles the images, transitions, captions, and audio into an MP4.
+4. FFmpeg adds cinematic movement, contextual effects, transitions, captions,
+   and audio, then creates a dedicated thumbnail.
 
 It also includes a Dockerized admin dashboard for automatic generation,
 manual video uploads, scheduling, and multi-platform publishing status.
@@ -92,7 +93,7 @@ generate_audio.py    Stable narration entry point
 generate_images.py   Stable image-generation entry point
 assemble_video.py    Stable video-assembly entry point
 
-data/ scripts/ audio/ images/ videos/   Persistent runtime output
+data/ scripts/ audio/ images/ videos/ thumbnails/   Persistent runtime output
 ```
 
 Implementation code lives under `src/`. The small root entry points preserve
@@ -219,11 +220,15 @@ $PYTHON assemble_video.py scripts/<script-name>.txt
 The assembler adds:
 
 - 1280×720 output
+- Slow cinematic zoom and alternating pan
+- Rich sleep-channel color grading and a soft vignette
+- Subtle scene-aware highlights only when the narration calls for them
 - Gentle crossfade transitions
-- Burned-in captions
+- Burned-in captions with a translucent background
 - H.264 video
 - AAC narration audio
 - Fast-start MP4 metadata
+- A separate high-contrast 1280×720 JPEG thumbnail with a short title
 
 If fewer images exist than expected, the available images are distributed
 evenly instead of failing.
@@ -232,6 +237,7 @@ Output:
 
 ```text
 videos/<script-name>.mp4
+thumbnails/<script-name>.jpg
 ```
 
 ## Output folders
@@ -241,6 +247,7 @@ scripts/  Generated narration text
 audio/    Final WAV narration and measured caption timing data
 images/   Scene images grouped by script
 videos/   Finished captioned MP4 videos
+thumbnails/ Dedicated 16:9 video thumbnails
 ```
 
 ## Testing

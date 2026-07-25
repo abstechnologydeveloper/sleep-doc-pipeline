@@ -12,13 +12,14 @@ Usage:
 
 import argparse
 import json
+import re
 import shutil
 import subprocess
 import tempfile
 import wave
 from pathlib import Path
 
-from project_paths import AUDIO_DIR, IMAGES_DIR, SCRIPTS_DIR, VIDEOS_DIR
+from project_paths import AUDIO_DIR, IMAGES_DIR, SCRIPTS_DIR, THUMBNAILS_DIR, VIDEOS_DIR
 
 
 WORDS_PER_SCENE = 50  # must match generate_images.py
@@ -27,6 +28,17 @@ TRANSITION_SECONDS = 1.0
 VIDEO_WIDTH = 1280
 VIDEO_HEIGHT = 720
 VIDEO_FPS = 24
+EFFECT_POINTS = (
+    (96, 88, 2.9, 0.2),
+    (211, 142, 3.7, 1.1),
+    (337, 76, 3.2, 2.0),
+    (482, 176, 4.1, 0.7),
+    (629, 104, 3.5, 1.8),
+    (773, 157, 4.4, 2.6),
+    (918, 69, 3.1, 0.9),
+    (1061, 129, 3.9, 2.2),
+    (1176, 91, 4.6, 1.4),
+)
 
 
 def select_script(script_argument: str | None) -> Path:
@@ -68,6 +80,14 @@ def count_scene_words(text: str, words_per_scene: int = WORDS_PER_SCENE) -> list
     for i in range(0, len(words), words_per_scene):
         counts.append(len(words[i:i + words_per_scene]))
     return counts
+
+
+def split_scene_text(text: str, words_per_scene: int = WORDS_PER_SCENE) -> list[str]:
+    words = text.split()
+    return [
+        " ".join(words[index:index + words_per_scene])
+        for index in range(0, len(words), words_per_scene)
+    ]
 
 
 def audio_duration(audio_path: Path) -> float:
@@ -148,8 +168,9 @@ def write_caption_file(
 def build_video_filter(
     scene_durations: list[float],
     caption_filename: str,
+    scene_texts: list[str],
 ) -> tuple[str, list[float]]:
-    """Build scaling, crossfade, and burned-caption filters for ffmpeg."""
+    """Build cinematic movement, contextual effects, fades, and captions."""
     transition = min(
         TRANSITION_SECONDS,
         min(scene_durations) / 2 if len(scene_durations) > 1 else 0,
@@ -161,13 +182,53 @@ def build_video_filter(
 
     filters = []
     for index in range(len(scene_durations)):
-        filters.append(
+        scene_text = scene_texts[index].lower() if index < len(scene_texts) else ""
+        frame_count = max(1, round(input_durations[index] * VIDEO_FPS))
+        if index % 2:
+            pan_x = f"(iw-iw/zoom)*(1-on/{frame_count})"
+        else:
+            pan_x = f"(iw-iw/zoom)*on/{frame_count}"
+
+        if any(word in scene_text for word in ("fireplace", "hearth", "candle", "lantern")):
+            grade = "eq=saturation=1.16:contrast=1.05:gamma_r=1.04:gamma_b=0.97"
+            effect = "embers"
+        elif any(word in scene_text for word in ("rain", "storm", "snow", "mist", "fog")):
+            grade = "eq=saturation=1.09:contrast=1.04:gamma_r=0.98:gamma_b=1.04"
+            effect = ""
+        elif any(
+            phrase in scene_text
+            for phrase in ("starlit", "starry", "constellation", "night sky", "stars above")
+        ):
+            grade = "eq=saturation=1.12:contrast=1.05:gamma_b=1.04"
+            effect = "stars"
+        elif any(word in scene_text for word in ("firefly", "fireflies", "enchanted", "magical garden")):
+            grade = "eq=saturation=1.15:contrast=1.04:gamma_g=1.03"
+            effect = "motes"
+        else:
+            grade = "eq=saturation=1.12:contrast=1.04"
+            effect = ""
+
+        scene_filter = (
             f"[{index}:v]"
             f"scale={VIDEO_WIDTH}:{VIDEO_HEIGHT}:force_original_aspect_ratio=increase,"
             f"crop={VIDEO_WIDTH}:{VIDEO_HEIGHT},"
-            "setsar=1,format=yuv420p,settb=AVTB,setpts=PTS-STARTPTS,"
-            f"fps={VIDEO_FPS}"
-            f"[scene{index}]"
+            f"zoompan=z='min(zoom+0.00015,1.06)':x='{pan_x}':"
+            f"y='ih/2-(ih/zoom/2)':d=1:s={VIDEO_WIDTH}x{VIDEO_HEIGHT}:fps={VIDEO_FPS},"
+            f"{grade},vignette=PI/5,setsar=1,format=yuv420p,settb=AVTB,setpts=PTS-STARTPTS"
+        )
+        if effect:
+            color = "white" if effect == "stars" else "0xffd27f"
+            y_offset = 0 if effect == "stars" else 245
+            for point, (x, y, period, phase) in enumerate(EFFECT_POINTS):
+                size = 2 + (point % 2)
+                scene_filter += (
+                    f",drawbox=x={x}:y={y + y_offset}:w={size}:h={size}:"
+                    f"color={color}@0.65:t=fill:"
+                    f"enable='lt(mod(t+{phase},{period}),0.7)'"
+                )
+        scene_filter += f"[scene{index}]"
+        filters.append(
+            scene_filter
         )
 
     current_label = "scene0"
@@ -185,7 +246,8 @@ def build_video_filter(
 
     caption_style = (
         "FontName=Arial,FontSize=22,PrimaryColour=&H00FFFFFF,"
-        "OutlineColour=&H00000000,BorderStyle=1,Outline=2,Shadow=1,"
+        "OutlineColour=&H00000000,BackColour=&H80000000,"
+        "BorderStyle=3,Outline=1,Shadow=0,"
         "Alignment=2,MarginV=42"
     )
     filters.append(
@@ -195,12 +257,106 @@ def build_video_filter(
     return ";".join(filters), input_durations
 
 
+def thumbnail_title(title: str, script_stem: str) -> str:
+    """Create a calm, readable three-to-six-word thumbnail headline."""
+    candidate = title.strip()
+    if not candidate:
+        candidate = re.sub(r"^\d{8}_\d{6}_", "", script_stem).replace("-", " ")
+    candidate = re.split(r"\s+[|—–]\s+", candidate, maxsplit=1)[0]
+    candidate = re.sub(
+        r"\b(?:sleep ambient|sleep story|relaxing music)\b.*$",
+        "",
+        candidate,
+        flags=re.IGNORECASE,
+    ).strip(" -:|")
+    words = candidate.split()[:6]
+    if not words:
+        words = ["A", "CALM", "NIGHT", "STORY"]
+    split_at = (len(words) + 1) // 2
+    lines = [" ".join(words[:split_at]), " ".join(words[split_at:])]
+    return r"\N".join(line.upper() for line in lines if line)
+
+
+def write_thumbnail_title_file(title: str, output_dir: Path) -> Path:
+    safe_title = title.replace("{", "(").replace("}", ")")
+    ass_content = f"""[Script Info]
+ScriptType: v4.00+
+PlayResX: {VIDEO_WIDTH}
+PlayResY: {VIDEO_HEIGHT}
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Title,Arial,58,&H00FFFFFF,&H00FFFFFF,&H00000000,&H88000000,-1,0,0,0,100,100,1,0,3,12,0,1,70,70,58,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:00:00.00,0:00:05.00,Title,,0,0,0,,{safe_title}
+"""
+    with tempfile.NamedTemporaryFile(
+        mode="w",
+        suffix=".ass",
+        prefix="thumbnail_title_",
+        dir=output_dir,
+        encoding="utf-8",
+        delete=False,
+    ) as title_file:
+        title_file.write(ass_content)
+        return Path(title_file.name)
+
+
+def render_thumbnail(
+    ffmpeg_path: str,
+    image_paths: list[Path],
+    title: str,
+    script_stem: str,
+) -> Path:
+    """Render a dedicated high-contrast 16:9 thumbnail from the richest scene."""
+    THUMBNAILS_DIR.mkdir(parents=True, exist_ok=True)
+    source_image = max(image_paths, key=lambda path: path.stat().st_size)
+    output_path = THUMBNAILS_DIR / f"{script_stem}.jpg"
+    temporary_output = output_path.with_suffix(".rendering.jpg")
+    title_path = write_thumbnail_title_file(
+        thumbnail_title(title, script_stem), THUMBNAILS_DIR
+    )
+    thumbnail_filter = (
+        f"scale={VIDEO_WIDTH}:{VIDEO_HEIGHT}:force_original_aspect_ratio=increase,"
+        f"crop={VIDEO_WIDTH}:{VIDEO_HEIGHT},"
+        "eq=saturation=1.2:contrast=1.08:brightness=-0.015,"
+        "unsharp=5:5:0.6:5:5:0,vignette=PI/5,"
+        f"subtitles=filename='{title_path.name}'"
+    )
+    try:
+        subprocess.run(
+            [
+                ffmpeg_path,
+                "-y",
+                "-i",
+                str(source_image),
+                "-vf",
+                thumbnail_filter,
+                "-frames:v",
+                "1",
+                "-q:v",
+                "2",
+                str(temporary_output),
+            ],
+            check=True,
+            cwd=THUMBNAILS_DIR,
+        )
+        temporary_output.replace(output_path)
+        return output_path
+    finally:
+        title_path.unlink(missing_ok=True)
+        temporary_output.unlink(missing_ok=True)
+
+
 def render_video(
     image_paths: list[Path],
     scene_durations: list[float],
     audio_path: Path,
     script_text: str,
     output_path: Path,
+    scene_texts: list[str],
 ) -> None:
     """Render crossfaded images, captions, and narration using ffmpeg."""
     ffmpeg_path = shutil.which("ffmpeg")
@@ -216,6 +372,7 @@ def render_video(
     video_filter, input_durations = build_video_filter(
         scene_durations,
         caption_path.name,
+        scene_texts,
     )
     temporary_output_path = output_path.with_suffix(".rendering.mp4")
     try:
@@ -282,6 +439,11 @@ def main() -> None:
         nargs="?",
         help="Path to the .txt script file; omit to select one interactively",
     )
+    parser.add_argument(
+        "--title",
+        default="",
+        help="Optional post title used for the generated thumbnail",
+    )
     args = parser.parse_args()
 
     script_path = select_script(args.script_path)
@@ -312,6 +474,7 @@ def main() -> None:
 
     text = script_path.read_text(encoding="utf-8")
     scene_word_counts = count_scene_words(text)
+    scene_texts = split_scene_text(text)
 
     if len(scene_word_counts) != len(image_paths):
         print(
@@ -320,6 +483,7 @@ def main() -> None:
             "across images as a fallback."
         )
         scene_word_counts = [1] * len(image_paths)
+        scene_texts = [""] * len(image_paths)
 
     print(f"Loading audio: {audio_path.name}")
     total_duration = audio_duration(audio_path)
@@ -337,9 +501,16 @@ def main() -> None:
     output_path = output_dir / f"{script_path.stem}.mp4"
 
     print(f"Rendering video to {output_path} (this can take a while)...")
-    render_video(image_paths, scene_durations, audio_path, text, output_path)
+    render_video(image_paths, scene_durations, audio_path, text, output_path, scene_texts)
+    thumbnail_path = render_thumbnail(
+        shutil.which("ffmpeg") or "ffmpeg",
+        image_paths,
+        args.title,
+        script_path.stem,
+    )
 
     print(f"\nDone. Saved video to {output_path}")
+    print(f"Thumbnail saved to {thumbnail_path}")
 
 
 if __name__ == "__main__":

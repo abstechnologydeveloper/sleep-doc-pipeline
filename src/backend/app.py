@@ -13,7 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
-from project_paths import DATA_DIR
+from project_paths import DATA_DIR, THUMBNAILS_DIR
 
 from . import database
 from .publishers import PLATFORMS, connector_statuses
@@ -218,8 +218,20 @@ def job_detail(request: Request, job_id: int):
     job, publications = database.get_job(job_id)
     if not job:
         return HTMLResponse("Job not found", status_code=404)
+    thumbnail_path = (
+        THUMBNAILS_DIR / f"{Path(job['video_path']).stem}.jpg"
+        if job["video_path"]
+        else None
+    )
     return TEMPLATES.TemplateResponse(
-        request, "job.html", {"job": job, "publications": publications, "csrf": csrf_token(request)}
+        request,
+        "job.html",
+        {
+            "job": job,
+            "publications": publications,
+            "thumbnail_ready": bool(thumbnail_path and thumbnail_path.is_file()),
+            "csrf": csrf_token(request),
+        },
     )
 
 
@@ -252,3 +264,17 @@ def job_video(request: Request, job_id: int):
     if not job or not job["video_path"] or not Path(job["video_path"]).is_file():
         return HTMLResponse("Video not available", status_code=404)
     return FileResponse(job["video_path"], media_type="video/mp4")
+
+
+@app.get("/jobs/{job_id}/thumbnail")
+def job_thumbnail(request: Request, job_id: int):
+    redirect = login_required(request)
+    if redirect:
+        return redirect
+    job, _ = database.get_job(job_id)
+    if not job or not job["video_path"]:
+        return HTMLResponse("Thumbnail not available", status_code=404)
+    thumbnail_path = THUMBNAILS_DIR / f"{Path(job['video_path']).stem}.jpg"
+    if not thumbnail_path.is_file():
+        return HTMLResponse("Thumbnail not available", status_code=404)
+    return FileResponse(thumbnail_path, media_type="image/jpeg")

@@ -29,7 +29,9 @@ MAX_RETRIES = 5
 RETRY_BASE_DELAY = 10  # seconds, doubles each retry
 
 STYLE_SUFFIX = (
-    ", calm atmospheric lighting, soft muted colors, cinematic wide shot, "
+    ", premium cinematic sleep-story artwork, rich teal and warm gold color harmony, "
+    "soft volumetric light, clear focal subject, layered foreground and background depth, "
+    "calm low-stimulation atmosphere, cinematic wide shot composed for 16:9, "
     "no text, no watermark, high detail"
 )
 SAFETY_FALLBACK_PROMPT = (
