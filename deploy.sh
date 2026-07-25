@@ -34,7 +34,10 @@ elif [[ ! -s "${DEPLOY_DIR}/.env" ]]; then
 fi
 
 cd "${DEPLOY_DIR}"
-docker compose up -d --build --remove-orphans --wait
+docker compose build
+docker compose run --rm --no-deps --user root --entrypoint chown studio \
+  studio:studio /app/data /app/scripts /app/audio /app/images /app/videos
+docker compose up -d --no-build --remove-orphans --wait
 curl --fail --silent --show-error http://127.0.0.1:8090/health
 
 # Keep active containers and persistent files. Remove only unused Docker
