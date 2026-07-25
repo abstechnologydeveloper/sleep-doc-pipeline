@@ -24,6 +24,21 @@ Example:
   "A lighthouse keeper notices one star missing from the sky" 1
 ```
 
+## Sleep ambient metadata samples
+
+Use these title and description samples in the admin form. The topic drives the
+story itself; the title and description present it as calm sleep-ambient
+content.
+
+| Topic | Title | Description |
+| --- | --- | --- |
+| A lighthouse keeper notices one star missing from the sky. | The Lighthouse and the Missing Star — Sleep Ambient Story | Drift into a calm sleep ambient journey beside a quiet lighthouse, distant waves, and a sky holding one gentle mystery. |
+| A quiet train makes its final journey through a sleeping countryside. | Midnight Train Through the Countryside — Sleep Ambient | Relax with a slow sleep ambient train journey through silent stations, moonlit fields, and peaceful nighttime scenery. |
+| An old clockmaker repairs a clock that remembers forgotten dreams. | The Clockmaker of Forgotten Dreams — Sleep Ambient Story | Unwind with a soft sleep ambient tale of ticking clocks, warm lamplight, and dreams returning one quiet memory at a time. |
+| A small boat follows a trail of lanterns across a moonlit lake. | Lanterns Across the Moonlit Lake — Sleep Ambient | Fall asleep to a gentle sleep ambient voyage across still water, glowing lanterns, and a peaceful moonlit horizon. |
+| A gardener discovers a flower that only blooms at midnight. | The Midnight Garden — Sleep Ambient Story | Settle into a calming sleep ambient garden filled with soft night sounds, silver leaves, and one flower opening beneath the moon. |
+| A night caretaker enters an abandoned cinema where the projector begins showing events that have not happened yet. | The Abandoned Cinema — Dark Sleep Ambient Story | A quiet dark sleep ambient mystery with an empty cinema, a softly humming projector, and gentle suspense without graphic or startling moments. |
+
 ## Five-minute story tests
 
 1. A cartographer maps an island that slowly changes shape every night.
