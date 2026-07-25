@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import hmac
 import os
@@ -6,7 +7,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import FastAPI, Form, Request, UploadFile
+from fastapi import FastAPI, Form, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -75,6 +76,36 @@ def login_required(request: Request):
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.websocket("/ws/jobs")
+async def job_updates(websocket: WebSocket):
+    if websocket.session.get("authenticated") is not True:
+        await websocket.close(code=4401)
+        return
+
+    await websocket.accept()
+    try:
+        while True:
+            jobs = await asyncio.to_thread(database.list_job_statuses)
+            await websocket.send_json(
+                {
+                    "jobs": [
+                        {
+                            "id": job["id"],
+                            "status": job["status"],
+                            "video_ready": bool(
+                                job["video_path"] and Path(job["video_path"]).is_file()
+                            ),
+                            "updated_at": job["updated_at"],
+                        }
+                        for job in jobs
+                    ]
+                }
+            )
+            await asyncio.sleep(1)
+    except (WebSocketDisconnect, OSError, RuntimeError):
+        pass
 
 
 @app.get("/login", response_class=HTMLResponse)

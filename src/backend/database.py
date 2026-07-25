@@ -96,6 +96,16 @@ def list_jobs(limit: int = 100):
         ).fetchall()
 
 
+def list_job_statuses(limit: int = 100) -> list[dict]:
+    with connect() as db:
+        rows = db.execute(
+            """SELECT id, status, video_path, updated_at
+            FROM jobs ORDER BY id DESC LIMIT ?""",
+            (limit,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+
 def get_job(job_id: int):
     with connect() as db:
         job = db.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()

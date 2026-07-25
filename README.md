@@ -19,6 +19,9 @@ The dashboard provides two workflows:
 - **Manual:** upload an existing MP4/MOV, add post metadata, and queue it for
   YouTube, Facebook, Instagram, and TikTok.
 
+Job status and completed-video availability update in the dashboard through an
+authenticated WebSocket connection, without requiring a page refresh.
+
 Copy `.env.example` to `.env`, set the API keys and a strong session secret,
 then start the dashboard:
 
