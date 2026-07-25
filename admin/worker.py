@@ -42,10 +42,15 @@ def process_job(job) -> None:
             if not video_path.is_file():
                 raise RuntimeError(f"Video file does not exist: {video_path}")
 
+        platforms = json.loads(job["platforms"])
+        if not platforms:
+            database.update_job(job["id"], "completed", video_path=str(video_path))
+            return
+
         database.update_job(job["id"], "publishing", video_path=str(video_path))
         metadata = dict(title=job["title"], description=job["description"], hashtags=job["hashtags"])
         waiting = False
-        for platform in json.loads(job["platforms"]):
+        for platform in platforms:
             try:
                 result = publish(platform, video_path, metadata)
                 database.update_publication(job["id"], platform, "published", **result)

@@ -117,10 +117,7 @@ def dashboard(request: Request):
 
 
 def selected_platforms(form) -> list[str]:
-    selected = [name for name in PLATFORMS if form.get(name) == "on"]
-    if not selected:
-        raise ValueError("Select at least one publishing platform")
-    return selected
+    return [name for name in PLATFORMS if form.get(name) == "on"]
 
 
 def normalized_schedule(value: str) -> str | None:
@@ -209,4 +206,4 @@ def job_video(request: Request, job_id: int):
     job, _ = database.get_job(job_id)
     if not job or not job["video_path"] or not Path(job["video_path"]).is_file():
         return HTMLResponse("Video not available", status_code=404)
-    return FileResponse(job["video_path"], media_type="video/mp4", filename=Path(job["video_path"]).name)
+    return FileResponse(job["video_path"], media_type="video/mp4")
