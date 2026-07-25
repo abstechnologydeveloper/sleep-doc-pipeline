@@ -12,15 +12,10 @@ permissions:
 
 jobs:
   validate:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, sleep-studio]
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-          cache: pip
-      - run: pip install -r requirements.txt
-      - run: python -m compileall -q admin *.py
+      - run: python3 -m compileall -q admin *.py
 
   deploy:
     needs: validate
