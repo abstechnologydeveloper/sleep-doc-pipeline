@@ -140,9 +140,13 @@ async def automatic_job(request: Request):
     minutes = float(str(form.get("minutes", "1")))
     if not topic or minutes <= 0:
         raise ValueError("Topic and positive duration are required")
+    title = str(form.get("title", "")).strip() or f"Sleep Ambient: {topic}"
+    description = str(form.get("description", "")).strip() or (
+        f"Relax and fall asleep with this calm sleep ambient story about {topic}."
+    )
     job_id = database.create_job(
         kind="automatic", topic=topic, minutes=minutes,
-        title=str(form.get("title") or topic), description=str(form.get("description", "")),
+        title=title, description=description,
         hashtags=str(form.get("hashtags", "")), platforms=selected_platforms(form),
         scheduled_at=normalized_schedule(str(form.get("scheduled_at", ""))),
     )
@@ -169,7 +173,9 @@ async def manual_job(
         while chunk := await video.read(1024 * 1024):
             output.write(chunk)
     job_id = database.create_job(
-        kind="manual", title=title.strip(), description=description, hashtags=hashtags,
+        kind="manual", title=title.strip(),
+        description=description.strip() or "Relax and fall asleep with this calming sleep ambient video.",
+        hashtags=hashtags,
         platforms=platforms, scheduled_at=normalized_schedule(scheduled_at), source_path=str(destination),
     )
     return RedirectResponse(f"/jobs/{job_id}", status_code=303)
