@@ -198,6 +198,16 @@ def retry(request: Request, job_id: int, csrf: str = Form()):
     return RedirectResponse(f"/jobs/{job_id}", status_code=303)
 
 
+@app.post("/jobs/{job_id}/delete")
+def delete_job(request: Request, job_id: int, csrf: str = Form()):
+    redirect = login_required(request)
+    if redirect:
+        return redirect
+    verify_csrf(request, csrf)
+    database.request_job_deletion(job_id)
+    return RedirectResponse("/", status_code=303)
+
+
 @app.get("/jobs/{job_id}/video")
 def job_video(request: Request, job_id: int):
     redirect = login_required(request)

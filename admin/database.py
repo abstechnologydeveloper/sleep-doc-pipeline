@@ -148,6 +148,31 @@ def retry_job(job_id: int) -> None:
         )
 
 
+def request_job_deletion(job_id: int) -> None:
+    with connect() as db:
+        job = db.execute("SELECT status FROM jobs WHERE id = ?", (job_id,)).fetchone()
+        if not job:
+            return
+        if job["status"] in {"processing", "publishing", "cancel_requested"}:
+            db.execute(
+                "UPDATE jobs SET status='cancel_requested', updated_at=? WHERE id=?",
+                (utc_now(), job_id),
+            )
+        else:
+            db.execute("DELETE FROM jobs WHERE id = ?", (job_id,))
+
+
+def cancellation_requested(job_id: int) -> bool:
+    with connect() as db:
+        job = db.execute("SELECT status FROM jobs WHERE id = ?", (job_id,)).fetchone()
+        return not job or job["status"] == "cancel_requested"
+
+
+def delete_job(job_id: int) -> None:
+    with connect() as db:
+        db.execute("DELETE FROM jobs WHERE id = ?", (job_id,))
+
+
 def update_publication(job_id: int, platform: str, status: str, **fields) -> None:
     allowed = {"remote_id", "remote_url", "error"}
     updates = {key: value for key, value in fields.items() if key in allowed}

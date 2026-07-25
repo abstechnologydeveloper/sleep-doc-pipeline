@@ -1,4 +1,6 @@
 import json
+import os
+import signal
 import subprocess
 import sys
 import threading
@@ -13,6 +15,10 @@ BASE_DIR = Path(__file__).resolve().parents[1]
 LOG_DIR = BASE_DIR / "data" / "logs"
 
 
+class JobCancelled(Exception):
+    pass
+
+
 def newest_video(before: set[Path]) -> Path:
     candidates = [p for p in (BASE_DIR / "videos").glob("*.mp4") if p not in before]
     if not candidates:
@@ -22,10 +28,24 @@ def newest_video(before: set[Path]) -> Path:
 
 def run_automatic(job, log_file) -> Path:
     existing = set((BASE_DIR / "videos").glob("*.mp4"))
-    subprocess.run(
+    process = subprocess.Popen(
         [sys.executable, str(BASE_DIR / "run_pipeline.py"), job["topic"], str(job["minutes"])],
-        cwd=BASE_DIR, stdout=log_file, stderr=subprocess.STDOUT, check=True,
+        cwd=BASE_DIR, stdout=log_file, stderr=subprocess.STDOUT, start_new_session=True,
     )
+    while process.poll() is None:
+        if database.cancellation_requested(job["id"]):
+            try:
+                os.killpg(process.pid, signal.SIGTERM)
+                process.wait(timeout=10)
+            except ProcessLookupError:
+                pass
+            except subprocess.TimeoutExpired:
+                os.killpg(process.pid, signal.SIGKILL)
+                process.wait()
+            raise JobCancelled
+        time.sleep(1)
+    if process.returncode:
+        raise subprocess.CalledProcessError(process.returncode, process.args)
     return newest_video(existing)
 
 
@@ -39,11 +59,15 @@ def process_job(job) -> None:
                 video_path = run_automatic(job, log_file)
             else:
                 video_path = Path(job["source_path"])
+            if database.cancellation_requested(job["id"]):
+                raise JobCancelled
             if not video_path.is_file():
                 raise RuntimeError(f"Video file does not exist: {video_path}")
 
         platforms = json.loads(job["platforms"])
         if not platforms:
+            if database.cancellation_requested(job["id"]):
+                raise JobCancelled
             database.update_job(job["id"], "completed", video_path=str(video_path))
             return
 
@@ -51,13 +75,19 @@ def process_job(job) -> None:
         metadata = dict(title=job["title"], description=job["description"], hashtags=job["hashtags"])
         waiting = False
         for platform in platforms:
+            if database.cancellation_requested(job["id"]):
+                raise JobCancelled
             try:
                 result = publish(platform, video_path, metadata)
                 database.update_publication(job["id"], platform, "published", **result)
             except RuntimeError as exc:
                 waiting = True
                 database.update_publication(job["id"], platform, "waiting", error=str(exc))
+        if database.cancellation_requested(job["id"]):
+            raise JobCancelled
         database.update_job(job["id"], "waiting_for_connections" if waiting else "published")
+    except JobCancelled:
+        database.delete_job(job["id"])
     except (OSError, subprocess.CalledProcessError, RuntimeError) as exc:
         database.update_job(job["id"], "failed", error=str(exc))
 
