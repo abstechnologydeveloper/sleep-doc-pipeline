@@ -236,7 +236,7 @@ videos/<script-name>.mp4
 
 ```text
 scripts/  Generated narration text
-audio/    Final WAV narration
+audio/    Final WAV narration and measured caption timing data
 images/   Scene images grouped by script
 videos/   Finished captioned MP4 videos
 ```

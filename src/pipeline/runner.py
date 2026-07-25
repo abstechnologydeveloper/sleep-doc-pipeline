@@ -173,9 +173,12 @@ def main() -> None:
         script_path = find_generated_script(previous_scripts).resolve()
 
     audio_path = AUDIO_DIR / f"{script_path.stem}.wav"
-    if audio_path.exists():
+    timing_path = audio_path.with_suffix(".timings.json")
+    if audio_path.exists() and timing_path.exists():
         print(f"Skipping existing audio: {audio_path.name}")
     else:
+        if audio_path.exists():
+            print("Regenerating audio because caption timing data is missing.")
         run_step(
             "2/4 Generating narration audio",
             [python, str(BASE_DIR / "generate_audio.py"), str(script_path)],

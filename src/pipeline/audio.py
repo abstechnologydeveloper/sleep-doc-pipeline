@@ -13,6 +13,7 @@ Usage:
 
 import argparse
 import io
+import json
 import os
 import re
 import shutil
@@ -31,7 +32,7 @@ from project_paths import AUDIO_DIR, PROJECT_ROOT, SCRIPTS_DIR
 
 MODEL = "gemini-2.5-flash-preview-tts"
 VOICE = "Kore"  # calm, steady default voice - see AI Studio for other options
-MAX_CHARS_PER_CHUNK = 4_000
+MAX_CHARS_PER_CHUNK = 500
 SAMPLE_RATE = 24_000
 CHANNELS = 1
 SAMPLE_WIDTH = 2
@@ -288,6 +289,45 @@ def stitch_chunks(chunk_dir: Path, chunk_count: int, output_path: Path) -> int:
     return total_frames
 
 
+def write_timing_file(
+    chunks: list[str], chunk_dir: Path, output_path: Path, total_frames: int
+) -> Path:
+    """Persist actual TTS chunk boundaries for caption synchronization."""
+    segments = []
+    elapsed_frames = 0
+    for chunk_number, text in enumerate(chunks, start=1):
+        chunk_path = chunk_dir / f"chunk_{chunk_number:03d}.wav"
+        with wave.open(str(chunk_path), "rb") as chunk_wf:
+            chunk_frames = chunk_wf.getnframes()
+        start = elapsed_frames / SAMPLE_RATE
+        elapsed_frames += chunk_frames
+        segments.append(
+            {
+                "text": text,
+                "start": start,
+                "end": elapsed_frames / SAMPLE_RATE,
+            }
+        )
+
+    timing_path = output_path.with_suffix(".timings.json")
+    temporary_path = timing_path.with_suffix(".json.tmp")
+    temporary_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "audio_duration": total_frames / SAMPLE_RATE,
+                "segments": segments,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    temporary_path.replace(timing_path)
+    return timing_path
+
+
 def main() -> None:
     args = parse_args()
     script_path = select_script(args.script_path)
@@ -312,9 +352,13 @@ def main() -> None:
     output_dir = AUDIO_DIR
     output_path = output_dir / f"{script_path.stem}.wav"
     total_frames = stitch_chunks(chunk_dir, len(chunks), output_path)
+    timing_path = write_timing_file(
+        chunks, chunk_dir, output_path, total_frames
+    )
 
     duration_seconds = total_frames / SAMPLE_RATE
     print(f"\nSaved narrated audio to {output_path}")
+    print(f"Saved caption timing data to {timing_path}")
     print(f"Approximate duration: {duration_seconds / 60:.1f} minutes")
 
     try:

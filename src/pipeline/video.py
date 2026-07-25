@@ -11,6 +11,7 @@ Usage:
 """
 
 import argparse
+import json
 import shutil
 import subprocess
 import tempfile
@@ -83,11 +84,39 @@ def srt_timestamp(seconds: float) -> str:
     return f"{hours:02d}:{minutes:02d}:{whole_seconds:02d},{milliseconds:03d}"
 
 
-def write_caption_file(text: str, duration: float, output_dir: Path) -> Path:
-    """Create proportionally timed captions and return the temporary SRT path."""
-    words = text.split()
-    if not words:
+def load_caption_segments(
+    text: str, duration: float, timing_path: Path
+) -> list[tuple[str, float, float]]:
+    """Load measured TTS boundaries, falling back for legacy audio files."""
+    if timing_path.is_file():
+        try:
+            payload = json.loads(timing_path.read_text(encoding="utf-8"))
+            measured_duration = float(payload["audio_duration"])
+            tolerance = max(0.25, duration * 0.01)
+            if abs(measured_duration - duration) > tolerance:
+                raise ValueError("timing data does not match the narration audio")
+            segments = [
+                (item["text"], float(item["start"]), float(item["end"]))
+                for item in payload["segments"]
+                if item["text"] and float(item["end"]) > float(item["start"])
+            ]
+            if segments:
+                return segments
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+            print(f"Warning: ignoring invalid caption timing data: {timing_path}")
+
+    print("Warning: measured caption timing is missing; using legacy estimated timing.")
+    return [(text, 0.0, duration)]
+
+
+def write_caption_file(
+    text: str, duration: float, output_dir: Path, timing_path: Path
+) -> Path:
+    """Create captions within measured TTS segment boundaries."""
+    if not text.split():
         raise SystemExit("The selected script is empty; captions cannot be created.")
+
+    segments = load_caption_segments(text, duration, timing_path)
 
     with tempfile.NamedTemporaryFile(
         mode="w",
@@ -98,19 +127,20 @@ def write_caption_file(text: str, duration: float, output_dir: Path) -> Path:
         delete=False,
     ) as captions:
         caption_number = 1
-        for start_index in range(0, len(words), WORDS_PER_CAPTION):
-            caption_words = words[
-                start_index:start_index + WORDS_PER_CAPTION
-            ]
-            end_index = start_index + len(caption_words)
-            start_time = (start_index / len(words)) * duration
-            end_time = (end_index / len(words)) * duration
-            captions.write(f"{caption_number}\n")
-            captions.write(
-                f"{srt_timestamp(start_time)} --> {srt_timestamp(end_time)}\n"
-            )
-            captions.write(" ".join(caption_words) + "\n\n")
-            caption_number += 1
+        for segment_text, segment_start, segment_end in segments:
+            words = segment_text.split()
+            segment_duration = segment_end - segment_start
+            for start_index in range(0, len(words), WORDS_PER_CAPTION):
+                caption_words = words[start_index:start_index + WORDS_PER_CAPTION]
+                end_index = start_index + len(caption_words)
+                start_time = segment_start + (start_index / len(words)) * segment_duration
+                end_time = segment_start + (end_index / len(words)) * segment_duration
+                captions.write(f"{caption_number}\n")
+                captions.write(
+                    f"{srt_timestamp(start_time)} --> {srt_timestamp(end_time)}\n"
+                )
+                captions.write(" ".join(caption_words) + "\n\n")
+                caption_number += 1
 
         return Path(captions.name)
 
@@ -181,6 +211,7 @@ def render_video(
         script_text,
         sum(scene_durations),
         output_path.parent,
+        audio_path.with_suffix(".timings.json"),
     )
     video_filter, input_durations = build_video_filter(
         scene_durations,
