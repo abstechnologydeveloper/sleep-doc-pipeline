@@ -77,8 +77,8 @@ Do not commit `.env` or share its contents.
 ```text
 src/
   pipeline/   Script, audio, image, video, and orchestration implementation
-  backend/    Database, background worker, and publishing integrations
-  web/        FastAPI routes, templates, and static assets
+  backend/    FastAPI server, database, worker, and publishing integrations
+  web/        Templates and static assets
   project_paths.py   Shared locations for persistent and generated files
 
 run_pipeline.py      Stable command-line entry point

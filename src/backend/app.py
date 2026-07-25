@@ -12,13 +12,14 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
-from backend import database
-from backend.publishers import PLATFORMS, connector_statuses
-from backend.worker import start_worker
 from project_paths import DATA_DIR
 
+from . import database
+from .publishers import PLATFORMS, connector_statuses
+from .worker import start_worker
 
-WEB_DIR = Path(__file__).resolve().parent
+
+WEB_DIR = Path(__file__).resolve().parents[1] / "web"
 UPLOAD_DIR = DATA_DIR / "uploads"
 TEMPLATES = Jinja2Templates(directory=WEB_DIR / "templates")
 ADMIN_USERNAME = "admin"
