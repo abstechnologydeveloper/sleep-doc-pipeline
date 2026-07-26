@@ -4,7 +4,7 @@ This project generates a complete narrated sleep-story video:
 
 1. Gemini writes the narration script.
 2. Gemini TTS creates the voice narration.
-3. Cloudflare Workers AI FLUX.1 Schnell creates the scene images.
+3. Cloudflare Workers AI Leonardo Lucid Origin creates native widescreen scene images.
 4. FFmpeg adds cinematic movement, contextual effects, transitions, captions,
    and audio, then creates a dedicated thumbnail.
 
@@ -74,6 +74,7 @@ Add the keys to `.env`:
 GEMINI_API_KEY=your_gemini_key
 CLOUDFLARE_ACCOUNT_ID=your_cloudflare_account_id
 CLOUDFLARE_API_TOKEN=your_workers_ai_api_token
+CLOUDFLARE_IMAGE_MODEL=@cf/leonardo/lucid-origin
 ```
 
 Do not commit `.env` or share its contents.
@@ -194,9 +195,14 @@ $PYTHON generate_images.py scripts/<script-name>.txt
 
 The current pacing is one image per 50 words, approximately six images for a
 two-minute narration. Gemini first creates and saves a visual continuity plan,
-then Cloudflare renders each scene plus one dedicated thumbnail composition.
+automatically choosing a fitting medium and editing direction for the story.
+Cloudflare then renders native 16:9 scenes plus one dedicated thumbnail composition.
 Existing scene files and the thumbnail source are skipped so interrupted runs
 can continue without paying for the same image twice.
+
+Lucid Origin is the quality default and is paid per generated tile and step. To
+restore the lower-cost fixed-format model, set
+`CLOUDFLARE_IMAGE_MODEL=@cf/black-forest-labs/flux-1-schnell`.
 
 Output:
 
@@ -226,10 +232,11 @@ The assembler adds:
 
 - 1280×720 output
 - Slow cinematic zoom and alternating pan
-- Rich sleep-channel color grading and a soft vignette
-- Subtle scene-aware highlights only when the narration calls for them
-- Gentle crossfade transitions
-- Burned-in captions with a translucent background
+- Story-directed camera movement, color grading, transitions, and atmosphere
+- Subtle rain, snow, stars, embers, or motes only when the scene calls for them
+- Short five-word burned-in captions with a translucent background
+- A matching `.srt` subtitle file for YouTube accessibility
+- Consistent narration loudness and gentle frequency cleanup
 - H.264 video
 - AAC narration audio
 - Fast-start MP4 metadata

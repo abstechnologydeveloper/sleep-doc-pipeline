@@ -23,7 +23,7 @@ from project_paths import AUDIO_DIR, IMAGES_DIR, SCRIPTS_DIR, THUMBNAILS_DIR, VI
 
 
 WORDS_PER_SCENE = 50  # must match generate_images.py
-WORDS_PER_CAPTION = 8
+WORDS_PER_CAPTION = 5
 TRANSITION_SECONDS = 1.0
 VIDEO_WIDTH = 1280
 VIDEO_HEIGHT = 720
@@ -88,6 +88,26 @@ def split_scene_text(text: str, words_per_scene: int = WORDS_PER_SCENE) -> list[
         " ".join(words[index:index + words_per_scene])
         for index in range(0, len(words), words_per_scene)
     ]
+
+
+def load_scene_directions(image_dir: Path, scene_count: int) -> list[dict]:
+    """Load art-directed camera, transition, and atmosphere choices when available."""
+    default = [
+        {"camera": "slow_push", "transition": "fade", "atmosphere": "auto"}
+        for _index in range(scene_count)
+    ]
+    plan_path = image_dir / "scene_plan.json"
+    if not plan_path.is_file():
+        return default
+    try:
+        payload = json.loads(plan_path.read_text(encoding="utf-8"))
+        directions = payload.get("scene_directions")
+        if not isinstance(directions, list) or len(directions) != scene_count:
+            return default
+        return [direction if isinstance(direction, dict) else default[index]
+                for index, direction in enumerate(directions)]
+    except (OSError, json.JSONDecodeError):
+        return default
 
 
 def audio_duration(audio_path: Path) -> float:
@@ -170,6 +190,7 @@ def build_video_filter(
     caption_filename: str,
     scene_texts: list[str],
     title_filename: str | None = None,
+    scene_directions: list[dict] | None = None,
 ) -> tuple[str, list[float]]:
     """Build cinematic movement, contextual effects, fades, and captions."""
     transition = min(
@@ -184,40 +205,59 @@ def build_video_filter(
     filters = []
     for index in range(len(scene_durations)):
         scene_text = scene_texts[index].lower() if index < len(scene_texts) else ""
+        direction = (
+            scene_directions[index]
+            if scene_directions and index < len(scene_directions)
+            else {}
+        )
         frame_count = max(1, round(input_durations[index] * VIDEO_FPS))
-        if index % 2:
+        camera = direction.get("camera", "slow_push")
+        if camera == "pan_left":
             pan_x = f"(iw-iw/zoom)*(1-on/{frame_count})"
-        else:
+        elif camera == "pan_right":
             pan_x = f"(iw-iw/zoom)*on/{frame_count}"
+        else:
+            pan_x = "iw/2-(iw/zoom/2)"
+        zoom = (
+            "if(eq(on,0),1.06,max(zoom-0.00015,1.0))"
+            if camera == "slow_pull"
+            else "min(zoom+0.00015,1.06)"
+        )
+
+        directed_effect = direction.get("atmosphere", "auto")
+        if directed_effect in {"stars", "rain", "snow", "embers", "fog", "motes", "none"}:
+            effect = directed_effect
+        else:
+            effect = "auto"
 
         if any(word in scene_text for word in ("fireplace", "hearth", "candle", "lantern")):
             grade = "eq=saturation=1.16:contrast=1.05:gamma_r=1.04:gamma_b=0.97"
-            effect = "embers"
+            effect = "embers" if effect == "auto" else effect
         elif any(word in scene_text for word in ("rain", "storm", "snow", "mist", "fog")):
             grade = "eq=saturation=1.09:contrast=1.04:gamma_r=0.98:gamma_b=1.04"
-            effect = ""
+            effect = "none" if effect == "auto" else effect
         elif any(
             phrase in scene_text
             for phrase in ("starlit", "starry", "constellation", "night sky", "stars above")
         ):
             grade = "eq=saturation=1.12:contrast=1.05:gamma_b=1.04"
-            effect = "stars"
+            effect = "stars" if effect == "auto" else effect
         elif any(word in scene_text for word in ("firefly", "fireflies", "enchanted", "magical garden")):
             grade = "eq=saturation=1.15:contrast=1.04:gamma_g=1.03"
-            effect = "motes"
+            effect = "motes" if effect == "auto" else effect
         else:
-            grade = "eq=saturation=1.12:contrast=1.04"
-            effect = ""
+            grade = "eq=saturation=1.08:contrast=1.035"
+            effect = "none" if effect == "auto" else effect
 
         scene_filter = (
             f"[{index}:v]"
             f"scale={VIDEO_WIDTH}:{VIDEO_HEIGHT}:force_original_aspect_ratio=increase,"
             f"crop={VIDEO_WIDTH}:{VIDEO_HEIGHT},"
-            f"zoompan=z='min(zoom+0.00015,1.06)':x='{pan_x}':"
+            f"zoompan=z='{zoom}':x='{pan_x}':"
             f"y='ih/2-(ih/zoom/2)':d=1:s={VIDEO_WIDTH}x{VIDEO_HEIGHT}:fps={VIDEO_FPS},"
             f"{grade},vignette=PI/5,setsar=1,format=yuv420p,settb=AVTB,setpts=PTS-STARTPTS"
         )
-        if effect:
+        if effect not in {"", "none", "fog"}:
             color = "white" if effect == "stars" else "0xffd27f"
             y_offset = 0 if effect == "stars" else 245
             for point, (x, y, period, phase) in enumerate(EFFECT_POINTS):
@@ -225,12 +265,28 @@ def build_video_filter(
                 if effect == "stars":
                     effect_x = str(x)
                     effect_y = str(y)
+                    effect_w = size
+                    effect_h = size
+                elif effect == "rain":
+                    color = "0xb9d9ed"
+                    effect_x = str(x)
+                    effect_y = f"mod({y}+t*115+{phase * 30:.1f},{VIDEO_HEIGHT})"
+                    effect_w = 1
+                    effect_h = 12
+                elif effect == "snow":
+                    color = "white"
+                    effect_x = f"{x}+14*sin(t*0.45+{phase})"
+                    effect_y = f"mod({y}+t*16+{phase * 30:.1f},{VIDEO_HEIGHT})"
+                    effect_w = size + 1
+                    effect_h = size + 1
                 else:
                     effect_x = f"{x}+10*sin(t*0.35+{phase})"
                     effect_y = f"{y + y_offset}-mod(t*5+{phase * 18:.1f},110)"
+                    effect_w = size
+                    effect_h = size
                 scene_filter += (
-                    f",drawbox=x='{effect_x}':y='{effect_y}':w={size}:h={size}:"
-                    f"color={color}@0.65:t=fill:"
+                    f",drawbox=x='{effect_x}':y='{effect_y}':w={effect_w}:h={effect_h}:"
+                    f"color={color}@0.45:t=fill:"
                     f"enable='lt(mod(t+{phase},{period}),0.7)'"
                 )
         scene_filter += f"[scene{index}]"
@@ -243,9 +299,18 @@ def build_video_filter(
     for index in range(1, len(scene_durations)):
         output_label = f"fade{index}"
         offset = max(0, current_duration - transition)
+        transition_name = "fade"
+        if scene_directions and index < len(scene_directions):
+            transition_name = {
+                "fade": "fade",
+                "dissolve": "dissolve",
+                "smooth_left": "smoothleft",
+                "smooth_right": "smoothright",
+            }.get(scene_directions[index].get("transition"), "fade")
         filters.append(
             f"[{current_label}][scene{index}]"
-            f"xfade=transition=fade:duration={transition:.3f}:offset={offset:.6f}"
+            f"xfade=transition={transition_name}:duration={transition:.3f}:"
+            f"offset={offset:.6f}"
             f"[{output_label}]"
         )
         current_label = output_label
@@ -258,7 +323,7 @@ def build_video_filter(
         current_label = "titled"
 
     caption_style = (
-        "FontName=Arial,FontSize=22,PrimaryColour=&H00FFFFFF,"
+        "FontName=Arial,FontSize=26,PrimaryColour=&H00FFFFFF,"
         "OutlineColour=&H00000000,BackColour=&H80000000,"
         "BorderStyle=3,Outline=1,Shadow=0,"
         "Alignment=2,MarginV=42"
@@ -417,6 +482,7 @@ def render_video(
     output_path: Path,
     scene_texts: list[str],
     title: str = "",
+    scene_directions: list[dict] | None = None,
 ) -> None:
     """Render crossfaded images, captions, and narration using ffmpeg."""
     ffmpeg_path = shutil.which("ffmpeg")
@@ -435,6 +501,7 @@ def render_video(
         caption_path.name,
         scene_texts,
         title_path.name if title_path else None,
+        scene_directions,
     )
     temporary_output_path = output_path.with_suffix(".rendering.mp4")
     try:
@@ -464,6 +531,8 @@ def render_video(
                 "[video]",
                 "-map",
                 f"{audio_input_index}:a:0",
+                "-af",
+                "highpass=f=65,lowpass=f=13500,loudnorm=I=-16:TP=-1.5:LRA=7",
                 "-c:v",
                 "libx264",
                 "-profile:v",
@@ -486,6 +555,7 @@ def render_video(
         )
         subprocess.run(command, check=True, cwd=output_path.parent)
         temporary_output_path.replace(output_path)
+        shutil.copy2(caption_path, output_path.with_suffix(".srt"))
     except subprocess.CalledProcessError as exc:
         raise SystemExit(f"ffmpeg failed with exit code {exc.returncode}.") from exc
     finally:
@@ -547,6 +617,7 @@ def main() -> None:
     text = script_path.read_text(encoding="utf-8")
     scene_word_counts = count_scene_words(text)
     scene_texts = split_scene_text(text)
+    scene_directions = load_scene_directions(image_dir, len(scene_word_counts))
 
     if len(scene_word_counts) != len(image_paths):
         print(
@@ -556,6 +627,7 @@ def main() -> None:
         )
         scene_word_counts = [1] * len(image_paths)
         scene_texts = [""] * len(image_paths)
+        scene_directions = load_scene_directions(image_dir, len(image_paths))
 
     print(f"Loading audio: {audio_path.name}")
     total_duration = audio_duration(audio_path)
@@ -581,6 +653,7 @@ def main() -> None:
         output_path,
         scene_texts,
         args.title,
+        scene_directions,
     )
     thumbnail_path = render_thumbnail(
         shutil.which("ffmpeg") or "ffmpeg",

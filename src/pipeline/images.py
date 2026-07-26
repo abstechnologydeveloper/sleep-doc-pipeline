@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate scene images with Cloudflare Workers AI's FLUX.1 Schnell API.
+"""Generate art-directed scene images with Cloudflare Workers AI.
 
 Resumable: each image saves to disk as soon as it's generated. Rerun the same
 command to pick up where it left off after a crash or rate limit.
@@ -26,16 +26,16 @@ from google.genai import types
 from project_paths import IMAGES_DIR, PROJECT_ROOT, SCRIPTS_DIR
 
 
-CLOUDFLARE_MODEL = "@cf/black-forest-labs/flux-1-schnell"
+CLOUDFLARE_MODEL = "@cf/leonardo/lucid-origin"
+FAST_IMAGE_MODEL = "@cf/black-forest-labs/flux-1-schnell"
 WORDS_PER_SCENE = 50  # roughly six images per two minutes at 150 words/minute
 MAX_RETRIES = 5
 RETRY_BASE_DELAY = 10  # seconds, doubles each retry
 
 STYLE_SUFFIX = (
-    ", premium cinematic sleep-story artwork, rich teal and warm gold color harmony, "
-    "soft volumetric light, clear focal subject, layered foreground and background depth, "
-    "calm low-stimulation atmosphere, cinematic wide shot composed for 16:9, "
-    "no text, no watermark, high detail"
+    ", polished professional storytelling image, coherent anatomy and perspective, "
+    "clear focal subject, layered foreground and background depth, intentional lighting, "
+    "native cinematic 16:9 composition, no text, no watermark, no logo, high detail"
 )
 SAFETY_FALLBACK_PROMPT = (
     "A peaceful empty landscape beneath a starlit night sky, gentle moonlight, "
@@ -69,8 +69,17 @@ def scene_to_prompt(scene_text: str) -> str:
 
 def fallback_visual_plan(scenes: list[str]) -> dict:
     return {
-        "visual_bible": "Consistent cinematic sleep-story artwork",
+        "project_profile": {
+            "audience": "general",
+            "visual_medium": "cinematic digital illustration",
+            "tone": "calm",
+        },
+        "visual_bible": "Consistent cinematic storytelling artwork",
         "scene_prompts": [scene_to_prompt(scene) for scene in scenes],
+        "scene_directions": [
+            {"camera": "slow_push", "transition": "fade", "atmosphere": "none"}
+            for _scene in scenes
+        ],
         "thumbnail_prompt": scene_to_prompt(scenes[0]),
     }
 
@@ -81,6 +90,9 @@ def valid_visual_plan(plan: object, scene_count: int) -> bool:
         and isinstance(plan.get("scene_prompts"), list)
         and len(plan["scene_prompts"]) == scene_count
         and all(isinstance(prompt, str) and prompt.strip() for prompt in plan["scene_prompts"])
+        and isinstance(plan.get("scene_directions"), list)
+        and len(plan["scene_directions"]) == scene_count
+        and all(isinstance(direction, dict) for direction in plan["scene_directions"])
         and isinstance(plan.get("thumbnail_prompt"), str)
         and bool(plan["thumbnail_prompt"].strip())
     )
@@ -102,24 +114,37 @@ def create_visual_plan(
     scene_list = "\n".join(
         f"{index}. {scene[:700]}" for index, scene in enumerate(scenes, start=1)
     )
-    prompt = f"""Act as a cinematic art director for an original sleep-story video.
-Create a visual continuity bible, one image prompt for every numbered narration scene,
-and one separate thumbnail prompt. Preserve recurring characters, clothing, architecture,
-weather, time of day, and color palette across all scenes. Describe visible action and
-composition rather than abstract narration. Keep motion calm and imagery suitable for sleep.
+    prompt = f"""Act as a senior art director and editor for an original narrated story.
+First infer the intended audience, genre, emotional tone, and best visual medium from the
+actual story. Do not force photorealism: choose cinematic live action for realistic adult
+stories, age-appropriate 2D/3D animation for children, graphic-novel or gothic illustration
+for suitable suspense, historically grounded realism for history, or another coherent medium
+when it genuinely fits. Never imitate a named living artist, studio, franchise, or copyrighted
+character.
 
-The generated images will be square and cropped to 16:9 later. Keep important subjects in the
-central safe area. For the thumbnail, place one strong focal subject on the right and leave
-clean darker space on the left for title text. Do not put words, letters, logos, watermarks,
-frames, split screens, collages, gore, nudity, or copyrighted characters in any prompt.
+Create a project profile, visual continuity bible, one image prompt and one restrained editing
+direction for every numbered narration scene, plus one separate thumbnail prompt. Preserve
+recurring faces, age, body shape, clothing, props, architecture, geography, weather, lighting,
+and palette across every scene. Describe visible action, camera distance, lens feeling, and
+composition rather than copying abstract narration. Keep every image age-appropriate.
+
+Compose every scene for cinematic 16:9, but keep important subjects inside a central safe area
+so the low-cost fallback model can also be cropped safely. For the thumbnail, place one strong
+focal subject on the right and leave clean darker space on the left for title text. Do not put
+words, letters, logos, watermarks, frames, split screens, collages, gore, nudity, or copyrighted
+characters in any prompt.
 
 Title: {title or '(derive from the story)'}
 Narration scenes:
 {scene_list}
 
 Return JSON only with:
+- project_profile: object with audience, genre, visual_medium, tone, palette, lighting
 - visual_bible: a concise string
 - scene_prompts: an array of exactly {len(scenes)} detailed strings in scene order
+- scene_directions: an array of exactly {len(scenes)} objects, each containing camera
+  (slow_push, slow_pull, pan_left, or pan_right), transition (fade, dissolve, smooth_left,
+  or smooth_right), and atmosphere (none, stars, rain, snow, embers, fog, or motes)
 - thumbnail_prompt: one detailed string
 """
 
@@ -160,17 +185,24 @@ Return JSON only with:
         return fallback_visual_plan(scenes)
 
 
-def request_image(account_id: str, api_token: str, prompt: str) -> tuple[bytes, str]:
+def request_image(
+    account_id: str, api_token: str, prompt: str, model: str
+) -> tuple[bytes, str]:
     api_url = (
         "https://api.cloudflare.com/client/v4/accounts/"
-        f"{account_id}/ai/run/{CLOUDFLARE_MODEL}"
+        f"{account_id}/ai/run/{model}"
     )
-    body = json.dumps(
-        {
-            "prompt": prompt,
-            "steps": 4,
-        }
-    ).encode("utf-8")
+    parameters = {"prompt": prompt}
+    if model == FAST_IMAGE_MODEL:
+        parameters["steps"] = 4
+    else:
+        parameters.update(
+            width=1536,
+            height=864,
+            num_steps=24,
+            guidance=5,
+        )
+    body = json.dumps(parameters).encode("utf-8")
     api_request = request.Request(
         api_url,
         data=body,
@@ -207,14 +239,16 @@ def request_image(account_id: str, api_token: str, prompt: str) -> tuple[bytes, 
     raise RuntimeError("Cloudflare returned an unsupported image format.")
 
 
-def generate_image(account_id: str, api_token: str, prompt: str) -> tuple[bytes, str]:
+def generate_image(
+    account_id: str, api_token: str, prompt: str, model: str
+) -> tuple[bytes, str]:
     last_error = None
     active_prompt = prompt
     used_safety_fallback = False
 
     for attempt in range(1, MAX_RETRIES + 1):
         try:
-            return request_image(account_id, api_token, active_prompt)
+            return request_image(account_id, api_token, active_prompt, model)
         except error.HTTPError as exc:
             details = exc.read().decode("utf-8", errors="replace").strip()
             if len(details) > 500:
@@ -282,7 +316,7 @@ def select_script(script_argument: str | None) -> Path:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Generate scene images using Cloudflare Workers AI FLUX.1 Schnell."
+        description="Generate art-directed scenes using Cloudflare Workers AI."
     )
     parser.add_argument(
         "script_path",
@@ -305,11 +339,18 @@ def main() -> None:
 
     account_id = os.getenv("CLOUDFLARE_ACCOUNT_ID")
     api_token = os.getenv("CLOUDFLARE_API_TOKEN")
+    image_model = os.getenv("CLOUDFLARE_IMAGE_MODEL", CLOUDFLARE_MODEL).strip()
     if not account_id or not api_token:
         raise SystemExit(
             "Cloudflare credentials were not found. Add CLOUDFLARE_ACCOUNT_ID "
             "and CLOUDFLARE_API_TOKEN to .env."
         )
+    if image_model not in {CLOUDFLARE_MODEL, FAST_IMAGE_MODEL}:
+        raise SystemExit(
+            "CLOUDFLARE_IMAGE_MODEL must be @cf/leonardo/lucid-origin or "
+            "@cf/black-forest-labs/flux-1-schnell."
+        )
+    print(f"Image model: {image_model}")
 
     text = script_path.read_text(encoding="utf-8")
     scenes = split_into_scenes(text)
@@ -346,7 +387,7 @@ def main() -> None:
         prompt = visual_plan["scene_prompts"][i - 1]
         print(f"  Generating scene {i}/{len(scenes)}: {prompt[:70]}...")
 
-        image_data, suffix = generate_image(account_id, api_token, prompt)
+        image_data, suffix = generate_image(account_id, api_token, prompt, image_model)
         image_path = image_dir / f"{image_stem}{suffix}"
         image_path.write_bytes(image_data)
 
@@ -366,6 +407,7 @@ def main() -> None:
             account_id,
             api_token,
             visual_plan["thumbnail_prompt"],
+            image_model,
         )
         (image_dir / f"{THUMBNAIL_STEM}{thumbnail_suffix}").write_bytes(
             thumbnail_data
