@@ -239,11 +239,16 @@ def build_video_filter(
     scene_texts: list[str],
     title_filename: str | None = None,
     scene_directions: list[dict] | None = None,
+    use_transitions: bool = True,
 ) -> tuple[str, list[float]]:
     """Build cinematic movement, contextual effects, fades, and captions."""
-    transition = min(
-        TRANSITION_SECONDS,
-        min(scene_durations) / 2 if len(scene_durations) > 1 else 0,
+    transition = (
+        min(
+            TRANSITION_SECONDS,
+            min(scene_durations) / 2 if len(scene_durations) > 1 else 0,
+        )
+        if use_transitions
+        else 0
     )
     input_durations = [
         duration if index == 0 else duration + transition
@@ -303,7 +308,9 @@ def build_video_filter(
             f"crop={VIDEO_WIDTH}:{VIDEO_HEIGHT},"
             f"zoompan=z='{zoom}':x='{pan_x}':"
             f"y='ih/2-(ih/zoom/2)':d=1:s={VIDEO_WIDTH}x{VIDEO_HEIGHT}:fps={VIDEO_FPS},"
-            f"{grade},vignette=PI/5,setsar=1,format=yuv420p,settb=AVTB,setpts=PTS-STARTPTS"
+            f"{grade},vignette=PI/5,setsar=1,format=yuv420p,"
+            f"fps={VIDEO_FPS},settb=1/{VIDEO_FPS},"
+            f"setpts=N/({VIDEO_FPS}*TB)"
         )
         if effect not in {"", "none", "fog"}:
             color = "white" if effect == "stars" else "0xffd27f"
@@ -342,27 +349,37 @@ def build_video_filter(
             scene_filter
         )
 
-    current_label = "scene0"
-    current_duration = input_durations[0]
-    for index in range(1, len(scene_durations)):
-        output_label = f"fade{index}"
-        offset = max(0, current_duration - transition)
-        transition_name = "fade"
-        if scene_directions and index < len(scene_directions):
-            transition_name = {
-                "fade": "fade",
-                "dissolve": "dissolve",
-                "smooth_left": "smoothleft",
-                "smooth_right": "smoothright",
-            }.get(scene_directions[index].get("transition"), "fade")
+    if use_transitions and len(scene_durations) > 1:
+        current_label = "scene0"
+        current_duration = input_durations[0]
+        for index in range(1, len(scene_durations)):
+            output_label = f"fade{index}"
+            offset = max(0, current_duration - transition)
+            transition_name = "fade"
+            if scene_directions and index < len(scene_directions):
+                transition_name = {
+                    "fade": "fade",
+                    "dissolve": "dissolve",
+                    "smooth_left": "smoothleft",
+                    "smooth_right": "smoothright",
+                }.get(scene_directions[index].get("transition"), "fade")
+            filters.append(
+                f"[{current_label}][scene{index}]"
+                f"xfade=transition={transition_name}:duration={transition:.3f}:"
+                f"offset={offset:.6f}"
+                f",fps={VIDEO_FPS},settb=1/{VIDEO_FPS}"
+                f"[{output_label}]"
+            )
+            current_label = output_label
+            current_duration += input_durations[index] - transition
+    elif len(scene_durations) > 1:
+        current_label = "joined"
         filters.append(
-            f"[{current_label}][scene{index}]"
-            f"xfade=transition={transition_name}:duration={transition:.3f}:"
-            f"offset={offset:.6f}"
-            f"[{output_label}]"
+            "".join(f"[scene{index}]" for index in range(len(scene_durations)))
+            + f"concat=n={len(scene_durations)}:v=1:a=0[{current_label}]"
         )
-        current_label = output_label
-        current_duration += input_durations[index] - transition
+    else:
+        current_label = "scene0"
 
     if title_filename:
         filters.append(
@@ -545,15 +562,17 @@ def render_video(
         audio_path.with_suffix(".timings.json"),
     )
     title_path = write_opening_title_file(title, output_path.parent)
-    video_filter, input_durations = build_video_filter(
-        scene_durations,
-        caption_path.name,
-        scene_texts,
-        title_path.name if title_path else None,
-        scene_directions,
-    )
     temporary_output_path = output_path.with_suffix(".rendering.mp4")
-    try:
+
+    def render_attempt(use_transitions: bool) -> None:
+        video_filter, input_durations = build_video_filter(
+            scene_durations,
+            caption_path.name,
+            scene_texts,
+            title_path.name if title_path else None,
+            scene_directions,
+            use_transitions,
+        )
         command = [ffmpeg_path, "-y"]
         for image_path, duration in zip(image_paths, input_durations):
             command.extend(
@@ -570,12 +589,7 @@ def render_video(
             )
 
         audio_input_index = len(image_paths)
-        command.extend(
-            [
-                "-i",
-                str(audio_path),
-            ]
-        )
+        command.extend(["-i", str(audio_path)])
         for cue in sound_cues or []:
             command.extend(["-i", str(cue["path"])])
 
@@ -635,6 +649,17 @@ def render_video(
             ]
         )
         subprocess.run(command, check=True, cwd=output_path.parent)
+
+    try:
+        try:
+            render_attempt(True)
+        except subprocess.CalledProcessError:
+            temporary_output_path.unlink(missing_ok=True)
+            print(
+                "Warning: cinematic transitions failed; retrying with "
+                "compatible scene changes."
+            )
+            render_attempt(False)
         temporary_output_path.replace(output_path)
         shutil.copy2(caption_path, output_path.with_suffix(".srt"))
     except subprocess.CalledProcessError as exc:
