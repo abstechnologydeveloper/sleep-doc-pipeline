@@ -1,0 +1,49 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="page-heading">
+  <div><p class="eyebrow">Shared publishing</p><h1>Social Posts</h1><p>Upload finished media or publish any completed video from one workspace.</p></div>
+</div>
+{% if error %}<div class="alert error" role="alert">{{ error }}</div>{% endif %}
+
+<div class="content-grid social-layout">
+  <section class="panel span-two">
+    <div class="section-heading"><div><h2>Media library</h2><p>Generated stories and finished uploads available for publishing.</p></div></div>
+    {% include '_media_grid.html' %}
+  </section>
+  <section class="panel">
+    <div class="section-heading"><div><h2>Add finished video</h2><p>Store an MP4, MOV, or M4V in the shared library.</p></div></div>
+    <form method="post" action="/media/upload" enctype="multipart/form-data" class="studio-form">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <label>Video file<input type="file" name="video" accept="video/mp4,video/quicktime,video/x-m4v" required></label>
+      <label>Media title<input name="title" required></label>
+      <label>Description <span>Optional</span><textarea name="description"></textarea></label>
+      <label>Hashtags <span>Optional</span><input name="hashtags"></label>
+      <button class="button secondary" type="submit">Upload to library</button>
+    </form>
+  </section>
+</div>
+
+<div class="content-grid social-layout">
+  <section class="panel span-two">
+    <div class="section-heading"><div><h2>Create social post</h2><p>Select finished media, then customize its publishing details.</p></div></div>
+    <form method="post" action="/social/posts" class="studio-form">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <label>Video from media library
+        <select name="media_job_id" required>
+          <option value="">Choose a finished video</option>
+          {% for item in media_items %}<option value="{{ item.id }}">#{{ item.id }} — {{ item.title }}</option>{% endfor %}
+        </select>
+      </label>
+      <label>Post title <span>Uses the media title when blank</span><input name="title"></label>
+      <label>Description <span>Uses the media description when blank</span><textarea name="description"></textarea></label>
+      <div class="field-row"><label>Hashtags <span>Optional</span><input name="hashtags"></label><label>Schedule in UTC <span>Optional</span><input type="datetime-local" name="scheduled_at"></label></div>
+      <fieldset><legend>Publishing platforms</legend><div class="platform-options">{% for platform in platforms %}<label class="check"><input type="checkbox" name="{{ platform }}"><span>{{ platform|title }}</span></label>{% endfor %}</div></fieldset>
+      <button class="button primary" type="submit" {{ 'disabled' if not media_items else '' }}>Create social post</button>
+    </form>
+  </section>
+  <section class="panel">
+    <div class="section-heading"><div><h2>Connections</h2><p>Posts wait safely when an official connector is unavailable.</p></div></div>
+    {% include '_connectors.html' %}
+  </section>
+</div>
+{% endblock %}

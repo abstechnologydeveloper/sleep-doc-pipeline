@@ -89,17 +89,68 @@ def create_job(**values) -> int:
         return int(job_id)
 
 
-def list_jobs(limit: int = 100):
+def create_uploaded_media(
+    *, title: str, description: str, hashtags: str, source_path: str
+) -> int:
+    """Register a finished upload as reusable media without queueing work."""
+    now = utc_now()
+    with connect() as db:
+        cursor = db.execute(
+            """INSERT INTO jobs
+            (kind, status, topic, minutes, title, description, hashtags,
+             platforms, scheduled_at, source_path, video_path, created_at, updated_at)
+            VALUES ('manual', 'completed', NULL, NULL, ?, ?, ?, '[]', NULL, ?, ?, ?, ?)""",
+            (title, description, hashtags, source_path, source_path, now, now),
+        )
+        return int(cursor.lastrowid)
+
+
+def list_jobs(
+    limit: int = 100,
+    kind: str | None = None,
+    status: str | None = None,
+):
+    filters = []
+    parameters: list[object] = []
+    if kind:
+        filters.append("kind = ?")
+        parameters.append(kind)
+    if status:
+        filters.append("status = ?")
+        parameters.append(status)
+    where_clause = f" WHERE {' AND '.join(filters)}" if filters else ""
+    parameters.append(limit)
     with connect() as db:
         return db.execute(
-            "SELECT * FROM jobs ORDER BY id DESC LIMIT ?", (limit,)
+            f"SELECT * FROM jobs{where_clause} ORDER BY id DESC LIMIT ?",
+            parameters,
         ).fetchall()
+
+
+def list_media_jobs(limit: int = 100):
+    """Return reusable generated videos and upload-only media records."""
+    with connect() as db:
+        return db.execute(
+            """SELECT * FROM jobs
+            WHERE video_path IS NOT NULL AND video_path != ''
+            AND (kind = 'automatic' OR (kind = 'manual' AND platforms = '[]'))
+            ORDER BY id DESC LIMIT ?""",
+            (limit,),
+        ).fetchall()
+
+
+def job_status_counts() -> dict[str, int]:
+    with connect() as db:
+        rows = db.execute(
+            "SELECT status, COUNT(*) AS total FROM jobs GROUP BY status"
+        ).fetchall()
+    return {str(row["status"]): int(row["total"]) for row in rows}
 
 
 def list_job_statuses(limit: int = 100) -> list[dict]:
     with connect() as db:
         rows = db.execute(
-            """SELECT id, status, title, video_path, updated_at
+            """SELECT id, kind, status, title, platforms, video_path, updated_at
             FROM jobs ORDER BY id DESC LIMIT ?""",
             (limit,),
         ).fetchall()

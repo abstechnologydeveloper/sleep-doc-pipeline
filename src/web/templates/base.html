@@ -1,1 +1,62 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{{ title or 'Sleep Studio' }}</title><link rel="stylesheet" href="/static/style.css"><script defer src="/static/jobs.js"></script></head><body><header><a href="/">Sleep Studio</a>{% if request.session.get('authenticated') %}<form method="post" action="/logout"><input type="hidden" name="csrf" value="{{ csrf }}"><button>Sign out</button></form>{% endif %}</header><main>{% block content %}{% endblock %}</main></body></html>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>{{ title or 'Sleep Studio' }}</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script defer src="/static/jobs.js"></script>
+</head>
+<body>
+{% if request.session.get('authenticated') %}
+  <div class="app-shell">
+    <aside class="sidebar" id="studio-sidebar">
+      <a class="brand" href="/">
+        <span class="brand-mark">S</span>
+        <span><strong>Sleep Studio</strong><small>Content workspace</small></span>
+      </a>
+      <nav aria-label="Studio navigation">
+        <a class="nav-item {{ 'active' if active_section == 'overview' else '' }}" href="/">
+          <span class="nav-icon">O</span><span>Overview</span>
+        </a>
+        <a class="nav-item {{ 'active' if active_section == 'storytelling' else '' }}" href="/storytelling">
+          <span class="nav-icon">S</span><span>Storytelling</span>
+        </a>
+        <a class="nav-item {{ 'active' if active_section == 'ambient' else '' }}" href="/ambient">
+          <span class="nav-icon">A</span><span>Ambient Video</span><small class="nav-tag">Soon</small>
+        </a>
+        <a class="nav-item {{ 'active' if active_section == 'social' else '' }}" href="/social">
+          <span class="nav-icon">P</span><span>Social Posts</span>
+        </a>
+        <a class="nav-item {{ 'active' if active_section == 'jobs' else '' }}" href="/jobs">
+          <span class="nav-icon">J</span><span>Jobs</span>
+        </a>
+      </nav>
+      <div class="sidebar-footer">
+        <div class="admin-identity"><span class="avatar">A</span><span><strong>Administrator</strong><small>Studio admin</small></span></div>
+        <form method="post" action="/logout">
+          <input type="hidden" name="csrf" value="{{ csrf }}">
+          <button class="text-button" type="submit">Sign out</button>
+        </form>
+      </div>
+    </aside>
+    <button class="sidebar-overlay" data-sidebar-close aria-label="Close navigation"></button>
+    <div class="workspace">
+      <header class="mobile-header">
+        <button class="menu-button" data-sidebar-toggle aria-controls="studio-sidebar" aria-expanded="false">☰</button>
+        <a href="/">Sleep Studio</a>
+      </header>
+      <main>
+{% else %}
+  <main class="auth-shell">
+{% endif %}
+        {% block content %}{% endblock %}
+{% if request.session.get('authenticated') %}
+      </main>
+    </div>
+  </div>
+{% else %}
+  </main>
+{% endif %}
+</body>
+</html>

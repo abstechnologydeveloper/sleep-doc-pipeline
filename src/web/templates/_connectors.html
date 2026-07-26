@@ -1,0 +1,11 @@
+<div class="connector-list">
+{% for connector in connectors %}
+  <div class="connector-row">
+    <span class="platform-mark">{{ connector.name[0]|upper }}</span>
+    <span><strong>{{ connector.name|title }}</strong><small>{{ connector.requirement }}</small></span>
+    <span class="status {{ 'status-completed' if connector.configured else 'status-waiting_for_connections' }}">
+      {{ 'Connected' if connector.configured else 'Not connected' }}
+    </span>
+  </div>
+{% endfor %}
+</div>

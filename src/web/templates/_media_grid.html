@@ -1,0 +1,19 @@
+<div class="media-grid">
+{% for item in media_items %}
+  <article class="media-card" data-media-id="{{ item.id }}">
+    <a class="media-preview" href="/jobs/{{ item.id }}">
+      {% if item.thumbnail_ready %}
+        <img src="/jobs/{{ item.id }}/thumbnail" alt="Thumbnail for {{ item.title }}">
+      {% else %}
+        <span>Video ready</span>
+      {% endif %}
+    </a>
+    <div class="media-copy">
+      <strong>{{ item.title or 'Untitled video' }}</strong>
+      <small>{{ 'Storytelling' if item.kind == 'automatic' else 'Uploaded video' }} · Job #{{ item.id }}</small>
+    </div>
+  </article>
+{% else %}
+  <div class="empty-panel">No finished videos are available yet.</div>
+{% endfor %}
+</div>

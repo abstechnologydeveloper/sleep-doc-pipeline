@@ -1,0 +1,30 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="page-heading">
+  <div><p class="eyebrow">Workspace</p><h1>Overview</h1><p>Monitor production, review finished media, and move quickly between workflows.</p></div>
+  <a class="button primary" href="/storytelling">Create story</a>
+</div>
+
+<div class="metric-grid">
+  <article><span>Total jobs</span><strong data-count="total">{{ summary.total }}</strong></article>
+  <article><span>Active</span><strong data-count="active">{{ summary.active }}</strong></article>
+  <article><span>Ready</span><strong data-count="ready">{{ summary.ready }}</strong></article>
+  <article><span>Failed</span><strong data-count="failed">{{ summary.failed }}</strong></article>
+</div>
+
+<div class="content-grid overview-grid">
+  <section class="panel span-two">
+    <div class="section-heading"><div><h2>Recent jobs</h2><p>Latest activity across every workflow.</p></div><a href="/jobs">View all</a></div>
+    {% include '_job_table.html' %}
+  </section>
+  <section class="panel">
+    <div class="section-heading"><div><h2>Publishing connections</h2><p>Official platform API readiness.</p></div></div>
+    {% include '_connectors.html' %}
+  </section>
+</div>
+
+<section class="panel">
+  <div class="section-heading"><div><h2>Latest media</h2><p>Finished videos ready to review or publish.</p></div><a href="/social">Open media library</a></div>
+  {% include '_media_grid.html' %}
+</section>
+{% endblock %}

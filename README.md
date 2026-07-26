@@ -14,16 +14,17 @@ manual video uploads, scheduling, and multi-platform publishing status.
 
 ## Admin dashboard
 
-The dashboard provides two workflows:
+The responsive admin uses a compact sidebar with five workspaces:
 
-- **Automatic:** keep the default duration and leave the content fields blank
-  to generate the topic, title, description, hashtags, and complete video, then
-  optionally queue it for selected platforms.
-- **Manual:** upload an existing MP4/MOV, add post metadata, and queue it for
-  YouTube, Facebook, Instagram, and TikTok.
+- **Overview:** production counts, recent jobs, finished media, and connector status.
+- **Storytelling:** generate complete narrated videos for the shared media library.
+- **Ambient Video:** a prepared but disabled workspace for the future ambient pipeline.
+- **Social Posts:** upload finished media or publish a library video with shared metadata.
+- **Jobs:** filter and manage generation, media-upload, and publishing jobs.
 
-Job status and completed-video availability update in the dashboard through an
-authenticated WebSocket connection, without requiring a page refresh.
+Job status, overview counts, and newly completed media update through an authenticated
+WebSocket connection. Publishing uses a server-validated media ID rather than accepting
+an arbitrary file path from the browser.
 
 Copy `.env.example` to `.env`, set the API keys and a strong session secret,
 then start the dashboard:

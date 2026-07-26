@@ -1,0 +1,39 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="page-heading">
+  <div><p class="eyebrow">Creation workflow</p><h1>Storytelling</h1><p>Generate a narrated story with original visuals, synchronized captions, and a thumbnail.</p></div>
+</div>
+
+<div class="content-grid form-layout">
+  <section class="panel">
+    <div class="section-heading"><div><h2>Create storytelling video</h2><p>Only the duration is required. Blank content fields are generated automatically.</p></div></div>
+    <form method="post" action="/jobs/automatic" class="studio-form">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <label>Story topic or niche <span>Optional</span><textarea name="topic" placeholder="For example: A baker discovers a tiny moon in a flour sack"></textarea></label>
+      <div class="field-row">
+        <label>Duration in minutes<input name="minutes" type="number" min="0.5" step="0.5" value="2" required></label>
+        <label>Schedule in UTC <span>Optional</span><input type="datetime-local" name="scheduled_at"></label>
+      </div>
+      <label>Post title <span>Optional</span><input name="title" placeholder="Generated automatically when blank"></label>
+      <label>Description <span>Optional</span><textarea name="description" placeholder="Generated automatically when blank"></textarea></label>
+      <label>Hashtags <span>Optional</span><input name="hashtags" placeholder="#SleepStory #Bedtime"></label>
+      <p class="form-note">Publishing is handled later from Social Posts, after you review the finished video.</p>
+      <button class="button primary" type="submit">Generate storytelling video</button>
+    </form>
+  </section>
+  <aside class="panel workflow-note">
+    <p class="eyebrow">Automatic flow</p>
+    <ol class="step-list">
+      <li><span>1</span><div><strong>Simple original story</strong><small>Gemini writes clear, audience-aware narration.</small></div></li>
+      <li><span>2</span><div><strong>Voice and timing</strong><small>Narration timing drives captions and scene pacing.</small></div></li>
+      <li><span>3</span><div><strong>Scenes and sound</strong><small>Cloudflare visuals and optional quiet effects support the story.</small></div></li>
+      <li><span>4</span><div><strong>Finished media</strong><small>The MP4 and thumbnail appear in the shared library.</small></div></li>
+    </ol>
+  </aside>
+</div>
+
+<section class="panel">
+  <div class="section-heading"><div><h2>Recent storytelling jobs</h2><p>Generation status updates automatically.</p></div><a href="/jobs?workflow=storytelling">View all</a></div>
+  {% include '_job_table.html' %}
+</section>
+{% endblock %}

@@ -1,0 +1,22 @@
+<div class="table-wrap">
+  <table class="job-table">
+    <thead><tr><th>Job</th><th>Workflow</th><th>Title</th><th>Status</th><th>Created</th></tr></thead>
+    <tbody>
+    {% for job in jobs %}
+      <tr data-job-id="{{ job.id }}">
+        <td><a href="/jobs/{{ job.id }}">#{{ job.id }}</a></td>
+        <td>
+          {% if job.kind == 'automatic' %}Storytelling
+          {% elif job.platforms == '[]' %}Uploaded Media
+          {% else %}Social Post{% endif %}
+        </td>
+        <td data-job-title>{{ job.title or 'Preparing…' }}</td>
+        <td><span class="status status-{{ job.status }}" data-job-status>{{ job.status|replace('_', ' ')|title }}</span></td>
+        <td class="muted">{{ job.created_at[:16]|replace('T', ' ') }}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="5" class="empty-state">No jobs match this view.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>

@@ -1,6 +1,7 @@
 import asyncio
 import hashlib
 import hmac
+import json
 import os
 import secrets
 from contextlib import asynccontextmanager
@@ -26,6 +27,16 @@ TEMPLATES = Jinja2Templates(directory=WEB_DIR / "templates")
 ADMIN_USERNAME = "admin"
 ADMIN_PASSWORD_SALT = bytes.fromhex("438e1e08c2debc9865471dfbcfa3b952")
 ADMIN_PASSWORD_HASH = bytes.fromhex("23268369118539671454ca6b90ccf3f52a38e2ec1475ca78f2f9b35f81190adc")
+JOB_STATUSES = (
+    "queued",
+    "processing",
+    "publishing",
+    "completed",
+    "published",
+    "waiting_for_connections",
+    "failed",
+    "cancel_requested",
+)
 
 
 def valid_admin_password(password: str) -> bool:
@@ -73,6 +84,57 @@ def login_required(request: Request):
     return None
 
 
+def page_context(request: Request, section: str, **values) -> dict:
+    return {
+        "active_section": section,
+        "csrf": csrf_token(request),
+        **values,
+    }
+
+
+def reusable_media() -> list[dict]:
+    items = []
+    for row in database.list_media_jobs():
+        video_path = Path(row["video_path"])
+        if not video_path.is_file():
+            continue
+        thumbnail_path = THUMBNAILS_DIR / f"{video_path.stem}.jpg"
+        item = dict(row)
+        item["thumbnail_ready"] = thumbnail_path.is_file()
+        items.append(item)
+    return items
+
+
+def reusable_media_job(job) -> bool:
+    if not job or not job["video_path"]:
+        return False
+    try:
+        platforms = json.loads(job["platforms"])
+    except (TypeError, json.JSONDecodeError):
+        return False
+    return job["kind"] == "automatic" or (
+        job["kind"] == "manual" and not platforms
+    )
+
+
+def render_social_page(
+    request: Request, error: str | None = None, status_code: int = 200
+):
+    return TEMPLATES.TemplateResponse(
+        request,
+        "social.html",
+        page_context(
+            request,
+            "social",
+            media_items=reusable_media(),
+            connectors=connector_statuses(),
+            platforms=PLATFORMS,
+            error=error,
+        ),
+        status_code=status_code,
+    )
+
+
 @app.get("/health")
 def health():
     return {"status": "ok"}
@@ -88,6 +150,7 @@ async def job_updates(websocket: WebSocket):
     try:
         while True:
             jobs = await asyncio.to_thread(database.list_job_statuses)
+            counts = await asyncio.to_thread(database.job_status_counts)
             await websocket.send_json(
                 {
                     "jobs": [
@@ -98,10 +161,31 @@ async def job_updates(websocket: WebSocket):
                             "video_ready": bool(
                                 job["video_path"] and Path(job["video_path"]).is_file()
                             ),
+                            "media_ready": bool(
+                                job["video_path"]
+                                and Path(job["video_path"]).is_file()
+                                and reusable_media_job(job)
+                            ),
                             "updated_at": job["updated_at"],
                         }
                         for job in jobs
-                    ]
+                    ],
+                    "summary": {
+                        "total": sum(counts.values()),
+                        "active": sum(
+                            counts.get(status, 0)
+                            for status in ("queued", "processing", "publishing")
+                        ),
+                        "ready": sum(
+                            counts.get(status, 0)
+                            for status in (
+                                "completed",
+                                "published",
+                                "waiting_for_connections",
+                            )
+                        ),
+                        "failed": counts.get("failed", 0),
+                    },
                 }
             )
             await asyncio.sleep(1)
@@ -144,9 +228,89 @@ def dashboard(request: Request):
     redirect = login_required(request)
     if redirect:
         return redirect
+    counts = database.job_status_counts()
+    summary = {
+        "total": sum(counts.values()),
+        "active": sum(counts.get(status, 0) for status in ("queued", "processing", "publishing")),
+        "failed": counts.get("failed", 0),
+        "ready": sum(
+            counts.get(status, 0)
+            for status in ("completed", "published", "waiting_for_connections")
+        ),
+    }
     return TEMPLATES.TemplateResponse(
-        request, "dashboard.html",
-        {"jobs": database.list_jobs(), "connectors": connector_statuses(), "platforms": PLATFORMS, "csrf": csrf_token(request)},
+        request,
+        "overview.html",
+        page_context(
+            request,
+            "overview",
+            summary=summary,
+            jobs=database.list_jobs(limit=8),
+            media_items=reusable_media()[:4],
+            connectors=connector_statuses(),
+        ),
+    )
+
+
+@app.get("/storytelling", response_class=HTMLResponse)
+def storytelling_page(request: Request):
+    redirect = login_required(request)
+    if redirect:
+        return redirect
+    return TEMPLATES.TemplateResponse(
+        request,
+        "storytelling.html",
+        page_context(
+            request,
+            "storytelling",
+            jobs=database.list_jobs(limit=8, kind="automatic"),
+        ),
+    )
+
+
+@app.get("/ambient", response_class=HTMLResponse)
+def ambient_page(request: Request):
+    redirect = login_required(request)
+    if redirect:
+        return redirect
+    return TEMPLATES.TemplateResponse(
+        request,
+        "ambient.html",
+        page_context(request, "ambient"),
+    )
+
+
+@app.get("/social", response_class=HTMLResponse)
+def social_page(request: Request):
+    redirect = login_required(request)
+    if redirect:
+        return redirect
+    return render_social_page(request)
+
+
+@app.get("/jobs", response_class=HTMLResponse)
+def jobs_page(request: Request):
+    redirect = login_required(request)
+    if redirect:
+        return redirect
+    workflow = request.query_params.get("workflow", "all")
+    selected_status = request.query_params.get("status", "all")
+    kind = {"storytelling": "automatic", "social": "manual"}.get(workflow)
+    status = selected_status if selected_status in JOB_STATUSES else None
+    if workflow not in {"all", "storytelling", "social"}:
+        workflow = "all"
+        kind = None
+    return TEMPLATES.TemplateResponse(
+        request,
+        "jobs.html",
+        page_context(
+            request,
+            "jobs",
+            jobs=database.list_jobs(kind=kind, status=status),
+            workflow=workflow,
+            selected_status=selected_status if status else "all",
+            job_statuses=JOB_STATUSES,
+        ),
     )
 
 
@@ -180,6 +344,97 @@ async def automatic_job(request: Request):
         description=str(form.get("description", "")).strip(),
         hashtags=str(form.get("hashtags", "")), platforms=selected_platforms(form),
         scheduled_at=normalized_schedule(str(form.get("scheduled_at", ""))),
+    )
+    return RedirectResponse(f"/jobs/{job_id}", status_code=303)
+
+
+@app.post("/media/upload")
+async def upload_media(
+    request: Request,
+    video: UploadFile,
+    title: str = Form(),
+    description: str = Form(""),
+    hashtags: str = Form(""),
+    csrf: str = Form(),
+):
+    redirect = login_required(request)
+    if redirect:
+        return redirect
+    try:
+        verify_csrf(request, csrf)
+    except ValueError:
+        return render_social_page(request, "Your form expired. Please try again.", 400)
+
+    suffix = Path(video.filename or "").suffix.lower()
+    if suffix not in {".mp4", ".mov", ".m4v"}:
+        return render_social_page(request, "Upload an MP4, MOV, or M4V video.", 400)
+    clean_title = title.strip()
+    if not clean_title:
+        return render_social_page(request, "A title is required for uploaded media.", 400)
+
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    destination = (
+        UPLOAD_DIR
+        / f"{datetime.now(timezone.utc):%Y%m%d_%H%M%S}_{secrets.token_hex(4)}{suffix}"
+    )
+    try:
+        with destination.open("wb") as output:
+            while chunk := await video.read(1024 * 1024):
+                output.write(chunk)
+        if destination.stat().st_size == 0:
+            raise ValueError("The uploaded video is empty.")
+        media_id = database.create_uploaded_media(
+            title=clean_title,
+            description=description.strip(),
+            hashtags=hashtags.strip(),
+            source_path=str(destination),
+        )
+    except (OSError, ValueError) as exc:
+        destination.unlink(missing_ok=True)
+        return render_social_page(request, str(exc), 400)
+    return RedirectResponse(f"/social?uploaded={media_id}", status_code=303)
+
+
+@app.post("/social/posts")
+async def create_social_post(request: Request):
+    redirect = login_required(request)
+    if redirect:
+        return redirect
+    form = await request.form()
+    try:
+        verify_csrf(request, str(form.get("csrf", "")))
+        media_job_id = int(str(form.get("media_job_id", "")))
+    except (ValueError, TypeError):
+        return render_social_page(request, "Choose a video from the media library.", 400)
+
+    media_job, _ = database.get_job(media_job_id)
+    if not reusable_media_job(media_job):
+        return render_social_page(request, "The selected media is not available.", 400)
+    video_path = Path(media_job["video_path"])
+    if not video_path.is_file():
+        return render_social_page(request, "The selected video file is missing.", 400)
+
+    platforms = selected_platforms(form)
+    if not platforms:
+        return render_social_page(request, "Select at least one publishing platform.", 400)
+    try:
+        scheduled_at = normalized_schedule(str(form.get("scheduled_at", "")))
+    except ValueError:
+        return render_social_page(request, "Enter a valid publication date and time.", 400)
+
+    title = str(form.get("title", "")).strip() or media_job["title"]
+    description = (
+        str(form.get("description", "")).strip() or media_job["description"]
+    )
+    hashtags = str(form.get("hashtags", "")).strip() or media_job["hashtags"]
+    job_id = database.create_job(
+        kind="manual",
+        title=title,
+        description=description,
+        hashtags=hashtags,
+        platforms=platforms,
+        scheduled_at=scheduled_at,
+        source_path=str(video_path),
     )
     return RedirectResponse(f"/jobs/{job_id}", status_code=303)
 
@@ -226,12 +481,13 @@ def job_detail(request: Request, job_id: int):
     return TEMPLATES.TemplateResponse(
         request,
         "job.html",
-        {
-            "job": job,
-            "publications": publications,
-            "thumbnail_ready": bool(thumbnail_path and thumbnail_path.is_file()),
-            "csrf": csrf_token(request),
-        },
+        page_context(
+            request,
+            "jobs",
+            job=job,
+            publications=publications,
+            thumbnail_ready=bool(thumbnail_path and thumbnail_path.is_file()),
+        ),
     )
 
 
