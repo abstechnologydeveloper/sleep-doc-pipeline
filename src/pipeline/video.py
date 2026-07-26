@@ -19,7 +19,14 @@ import tempfile
 import wave
 from pathlib import Path
 
-from project_paths import AUDIO_DIR, IMAGES_DIR, SCRIPTS_DIR, THUMBNAILS_DIR, VIDEOS_DIR
+from project_paths import (
+    AUDIO_DIR,
+    IMAGES_DIR,
+    SCRIPTS_DIR,
+    SOUNDS_DIR,
+    THUMBNAILS_DIR,
+    VIDEOS_DIR,
+)
 
 
 WORDS_PER_SCENE = 50  # must match generate_images.py
@@ -108,6 +115,47 @@ def load_scene_directions(image_dir: Path, scene_count: int) -> list[dict]:
                 for index, direction in enumerate(directions)]
     except (OSError, json.JSONDecodeError):
         return default
+
+
+def load_sound_cues(script_stem: str, scene_durations: list[float]) -> list[dict]:
+    """Load generated effects and convert scene-relative positions to timestamps."""
+    sound_dir = SOUNDS_DIR / script_stem
+    manifest_path = sound_dir / "sound_manifest.json"
+    if not manifest_path.is_file():
+        return []
+    try:
+        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        print(f"Warning: ignoring invalid sound manifest: {manifest_path}")
+        return []
+
+    scene_starts = []
+    elapsed = 0.0
+    for duration in scene_durations:
+        scene_starts.append(elapsed)
+        elapsed += duration
+
+    cues = []
+    for cue in payload.get("cues", []):
+        try:
+            scene_index = int(cue["scene_index"]) - 1
+            position = min(1.0, max(0.0, float(cue.get("position", 0.5))))
+            volume = min(0.16, max(0.04, float(cue.get("volume", 0.10))))
+            duration = min(4.0, max(0.5, float(cue.get("duration_seconds", 2.0))))
+            path = sound_dir / Path(str(cue["filename"])).name
+        except (KeyError, TypeError, ValueError):
+            continue
+        if not 0 <= scene_index < len(scene_durations) or not path.is_file():
+            continue
+        cues.append(
+            {
+                "path": path,
+                "start": scene_starts[scene_index] + position * scene_durations[scene_index],
+                "volume": volume,
+                "duration": duration,
+            }
+        )
+    return cues
 
 
 def audio_duration(audio_path: Path) -> float:
@@ -483,8 +531,9 @@ def render_video(
     scene_texts: list[str],
     title: str = "",
     scene_directions: list[dict] | None = None,
+    sound_cues: list[dict] | None = None,
 ) -> None:
-    """Render crossfaded images, captions, and narration using ffmpeg."""
+    """Render crossfaded images, captions, narration, and sparse effects."""
     ffmpeg_path = shutil.which("ffmpeg")
     if not ffmpeg_path:
         raise SystemExit("ffmpeg was not found on PATH.")
@@ -525,14 +574,46 @@ def render_video(
             [
                 "-i",
                 str(audio_path),
+            ]
+        )
+        for cue in sound_cues or []:
+            command.extend(["-i", str(cue["path"])])
+
+        audio_filters = [
+            f"[{audio_input_index}:a]highpass=f=65,lowpass=f=13500,"
+            "loudnorm=I=-16:TP=-1.5:LRA=7[narration]"
+        ]
+        sound_labels = []
+        for index, cue in enumerate(sound_cues or []):
+            input_index = audio_input_index + index + 1
+            delay_ms = max(0, round(cue["start"] * 1_000))
+            fade_out_start = max(0.0, cue["duration"] - 0.25)
+            label = f"effect{index}"
+            audio_filters.append(
+                f"[{input_index}:a]volume={cue['volume']:.3f},"
+                "afade=t=in:st=0:d=0.12,"
+                f"afade=t=out:st={fade_out_start:.3f}:d=0.25,"
+                f"adelay={delay_ms}:all=1[{label}]"
+            )
+            sound_labels.append(f"[{label}]")
+
+        if sound_labels:
+            audio_filters.append(
+                f"[narration]{''.join(sound_labels)}"
+                f"amix=inputs={len(sound_labels) + 1}:duration=first:"
+                "dropout_transition=0:normalize=0,alimiter=limit=0.95[audio]"
+            )
+        else:
+            audio_filters.append("[narration]anull[audio]")
+
+        command.extend(
+            [
                 "-filter_complex",
-                video_filter,
+                ";".join([video_filter, *audio_filters]),
                 "-map",
                 "[video]",
                 "-map",
-                f"{audio_input_index}:a:0",
-                "-af",
-                "highpass=f=65,lowpass=f=13500,loudnorm=I=-16:TP=-1.5:LRA=7",
+                "[audio]",
                 "-c:v",
                 "libx264",
                 "-profile:v",
@@ -636,9 +717,12 @@ def main() -> None:
         (word_count / total_words) * total_duration
         for word_count in scene_word_counts
     ]
+    sound_cues = load_sound_cues(script_path.stem, scene_durations)
 
     print(f"Audio duration: {total_duration / 60:.1f} minutes")
     print(f"Building {len(image_paths)} timed image clips...")
+    if sound_cues:
+        print(f"Mixing {len(sound_cues)} quiet story sound effects...")
 
     output_dir = VIDEOS_DIR
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -654,6 +738,7 @@ def main() -> None:
         scene_texts,
         args.title,
         scene_directions,
+        sound_cues,
     )
     thumbnail_path = render_thumbnail(
         shutil.which("ffmpeg") or "ffmpeg",

@@ -144,4 +144,5 @@ Resume the newest incomplete project with:
 
 ```bash
 /Users/apple/.pyenv/versions/3.12.0/bin/python run_pipeline.py --resume
+mart@abs12345! 
 ```

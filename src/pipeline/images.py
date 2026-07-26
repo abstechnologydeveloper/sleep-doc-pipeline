@@ -80,6 +80,7 @@ def fallback_visual_plan(scenes: list[str]) -> dict:
             {"camera": "slow_push", "transition": "fade", "atmosphere": "none"}
             for _scene in scenes
         ],
+        "sound_cues": [],
         "thumbnail_prompt": scene_to_prompt(scenes[0]),
     }
 
@@ -93,6 +94,8 @@ def valid_visual_plan(plan: object, scene_count: int) -> bool:
         and isinstance(plan.get("scene_directions"), list)
         and len(plan["scene_directions"]) == scene_count
         and all(isinstance(direction, dict) for direction in plan["scene_directions"])
+        and "sound_cues" in plan
+        and isinstance(plan.get("sound_cues"), list)
         and isinstance(plan.get("thumbnail_prompt"), str)
         and bool(plan["thumbnail_prompt"].strip())
     )
@@ -123,7 +126,8 @@ when it genuinely fits. Never imitate a named living artist, studio, franchise, 
 character.
 
 Create a project profile, visual continuity bible, one image prompt and one restrained editing
-direction for every numbered narration scene, plus one separate thumbnail prompt. Preserve
+direction for every numbered narration scene, a sparse sound cue sheet, plus one separate
+thumbnail prompt. Preserve
 recurring faces, age, body shape, clothing, props, architecture, geography, weather, lighting,
 and palette across every scene. Describe visible action, camera distance, lens feeling, and
 composition rather than copying abstract narration. Keep every image age-appropriate.
@@ -133,6 +137,14 @@ so the low-cost fallback model can also be cropped safely. For the thumbnail, pl
 focal subject on the right and leave clean darker space on the left for title text. Do not put
 words, letters, logos, watermarks, frames, split screens, collages, gore, nudity, or copyrighted
 characters in any prompt.
+
+Sound design must support the story without competing with narration. Choose only clear,
+visible or strongly implied story moments such as soft footsteps, a door opening, cloth or
+leaves moving, birds, water, rain, wind, a small magical sound, or an occasional subtle
+transition. Do not add a cue to every scene. Use no more than {min(30, max(1, (len(scenes) + 1) // 2))}
+cues total, avoid loud bangs, screams, jump scares, music, speech, and constant ambience, and
+keep sleep stories gentle. Adapt the sound character to the inferred audience and genre:
+playful but controlled for cartoons and children, natural and restrained for adults.
 
 Title: {title or '(derive from the story)'}
 Narration scenes:
@@ -145,6 +157,9 @@ Return JSON only with:
 - scene_directions: an array of exactly {len(scenes)} objects, each containing camera
   (slow_push, slow_pull, pan_left, or pan_right), transition (fade, dissolve, smooth_left,
   or smooth_right), and atmosphere (none, stars, rain, snow, embers, fog, or motes)
+- sound_cues: a sparse array of objects containing scene_index (1-based), position (a number
+  from 0 to 1 within that scene), prompt (a concise sound-only description), duration_seconds
+  (0.5 to 4.0), volume (0.04 to 0.16), and kind (action, environment, or transition)
 - thumbnail_prompt: one detailed string
 """
 

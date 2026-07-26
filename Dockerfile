@@ -13,7 +13,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
-RUN mkdir -p data scripts audio images videos thumbnails \
+RUN mkdir -p data scripts audio images videos thumbnails sounds \
     && useradd --system --uid 10001 --create-home studio \
     && chown -R studio:studio /app
 

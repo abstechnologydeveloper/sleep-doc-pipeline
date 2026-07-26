@@ -27,10 +27,24 @@ Create one continuous narrative arc with no chapters, chapter headings, numbered
 repeated templates, or other structural labels. Use calm, low-stimulation pacing suitable
 for a listener who is falling asleep. The finished script must be {min_words:,} to
 {max_words:,} words. Do not copy, quote, or closely paraphrase any real source material.
-Use original language and vary sentence length and rhythm so the prose does not sound
-repetitive or like AI filler. Return only narration prose, without notes about the request
-or the writing process. Follow the requested word range closely and include a gentle,
-complete ending."""
+Use original language and follow these writing rules:
+- Write in plain, everyday English that is easy to understand when heard once.
+- Prefer concrete words and actions. Avoid academic words, formal phrasing, purple prose,
+  long explanations, and abstract descriptions.
+- Keep most sentences between 6 and 14 words, with occasional shorter or longer sentences
+  for a natural spoken rhythm.
+- Open with a simple curiosity hook, then introduce a small discovery, choice, surprise,
+  funny detail, or emotional change regularly so the journey stays interesting.
+- Use natural dialogue and gentle humor when they fit. Never force jokes into sad, tense,
+  historical, or reflective moments.
+- Infer the likely audience and genre from the topic. A children's or cartoon story may be
+  playful and lively; an adult story should remain mature without becoming stiff or childish.
+- Show what happens instead of lecturing, explaining a moral, or repeatedly describing the
+  atmosphere. Avoid filler, cliches, recaps, and repeated ideas.
+- Keep danger age-appropriate and avoid sudden disturbing detail because this is sleep content.
+Vary sentence rhythm so the prose does not sound repetitive or like AI filler. Return only
+narration prose, without notes about the request or writing process. Follow the requested word
+range closely and include a gentle, satisfying, complete ending."""
 
 
 def word_count(text: str) -> int:

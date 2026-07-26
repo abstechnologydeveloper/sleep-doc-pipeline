@@ -9,6 +9,7 @@ mkdir -p \
   "${DEPLOY_DIR}/data" \
   "${DEPLOY_DIR}/audio" \
   "${DEPLOY_DIR}/images" \
+  "${DEPLOY_DIR}/sounds" \
   "${DEPLOY_DIR}/scripts" \
   "${DEPLOY_DIR}/videos" \
   "${DEPLOY_DIR}/thumbnails"
@@ -22,6 +23,7 @@ rsync -az --delete \
   --exclude 'data/' \
   --exclude 'audio/' \
   --exclude 'images/' \
+  --exclude 'sounds/' \
   --exclude 'scripts/' \
   --exclude 'videos/' \
   --exclude 'thumbnails/' \
@@ -38,7 +40,7 @@ fi
 cd "${DEPLOY_DIR}"
 docker compose build
 docker compose run --rm --no-deps --user root --entrypoint chown studio \
-  studio:studio /app/data /app/scripts /app/audio /app/images /app/videos /app/thumbnails
+  studio:studio /app/data /app/scripts /app/audio /app/images /app/sounds /app/videos /app/thumbnails
 docker compose up -d --no-build --remove-orphans --wait
 curl --fail --silent --show-error http://127.0.0.1:8090/health
 

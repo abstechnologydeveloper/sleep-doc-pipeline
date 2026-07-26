@@ -20,6 +20,7 @@ from project_paths import (
     IMAGES_DIR,
     PROJECT_ROOT,
     SCRIPTS_DIR,
+    SOUNDS_DIR,
     THUMBNAILS_DIR,
     VIDEOS_DIR,
 )
@@ -29,6 +30,7 @@ PIPELINE_STEPS = (
     "generate_script.py",
     "generate_audio.py",
     "generate_images.py",
+    "generate_sounds.py",
     "assemble_video.py",
 )
 
@@ -172,7 +174,7 @@ def main() -> None:
         minutes = prompt_for_minutes(args.minutes)
         previous_scripts = snapshot_scripts()
         run_step(
-            "1/4 Generating narration script",
+            "1/5 Generating narration script",
             [
                 python,
                 str(BASE_DIR / "generate_script.py"),
@@ -192,11 +194,11 @@ def main() -> None:
         if audio_path.exists():
             print("Regenerating audio because caption timing data is missing.")
         run_step(
-            "2/4 Generating narration audio",
+            "2/5 Generating narration audio",
             [python, str(BASE_DIR / "generate_audio.py"), str(script_path)],
         )
     run_step(
-        "3/4 Generating Cloudflare scene images",
+        "3/5 Generating Cloudflare scene images",
         [
             python,
             str(BASE_DIR / "generate_images.py"),
@@ -206,7 +208,11 @@ def main() -> None:
         ],
     )
     run_step(
-        "4/4 Assembling captioned video",
+        "4/5 Generating optional story sound effects",
+        [python, str(BASE_DIR / "generate_sounds.py"), str(script_path)],
+    )
+    run_step(
+        "5/5 Assembling captioned video",
         [
             python,
             str(BASE_DIR / "assemble_video.py"),
@@ -224,6 +230,8 @@ def main() -> None:
     print(f"Script: {script_path}")
     print(f"Audio:  {audio_path}")
     print(f"Images: {IMAGES_DIR / script_path.stem}")
+    if (SOUNDS_DIR / script_path.stem).is_dir():
+        print(f"Sounds: {SOUNDS_DIR / script_path.stem}")
     print(f"Video:  {video_path}")
     print(f"Thumb:  {THUMBNAILS_DIR / f'{script_path.stem}.jpg'}")
 

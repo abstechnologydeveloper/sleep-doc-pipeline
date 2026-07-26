@@ -33,9 +33,11 @@ def generate_post_metadata(
         raise RuntimeError("GEMINI_API_KEY is required for automatic post generation")
 
     prompt = f"""Create the missing fields for one original sleep-story video.
-The concept must be calm, low-stimulation, atmospheric, and suitable for a sleep ambient
-YouTube channel. It may be cozy, historical, mysterious, or gently eerie, but never
-graphic, loud, or based closely on an existing copyrighted story.
+The concept must be easy to understand, fun to follow, calm enough for bedtime, and suitable
+for a storytelling YouTube channel. Give it a clear character, goal, curiosity hook, and a few
+small discoveries instead of relying only on atmosphere. It may be playful, cozy, historical,
+mysterious, gently eerie, for children, or for adults, but never graphic, loud, childish when
+the audience is adult, or based closely on an existing copyrighted story.
 
 Existing values must be preserved when present:
 - topic: {supplied['topic'] or '(generate this)'}
@@ -44,9 +46,10 @@ Existing values must be preserved when present:
 - hashtags: {supplied['hashtags'] or '(generate this)'}
 
 Return one JSON object with string fields named topic, title, description, and hashtags.
-The topic should be one specific story premise. The title should be natural and concise.
-The description should be two calm sentences. Hashtags should contain 4-6 relevant tags
-separated by spaces. Return JSON only."""
+The topic should be one specific story premise written in plain everyday English. The title
+should be natural, intriguing, and concise without clickbait or difficult words. The description
+should be two clear sentences. Hashtags should contain 4-6 relevant tags separated by spaces.
+Return JSON only."""
 
     try:
         client = genai.Client(api_key=api_key)

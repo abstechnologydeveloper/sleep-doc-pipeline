@@ -5,8 +5,9 @@ This project generates a complete narrated sleep-story video:
 1. Gemini writes the narration script.
 2. Gemini TTS creates the voice narration.
 3. Cloudflare Workers AI Leonardo Lucid Origin creates native widescreen scene images.
-4. FFmpeg adds cinematic movement, contextual effects, transitions, captions,
-   and audio, then creates a dedicated thumbnail.
+4. ElevenLabs optionally creates sparse, story-specific sound effects.
+5. FFmpeg adds cinematic movement, contextual effects, transitions, captions,
+   narration, and quiet sound effects, then creates a dedicated thumbnail.
 
 It also includes a Dockerized admin dashboard for automatic generation,
 manual video uploads, scheduling, and multi-platform publishing status.
@@ -54,7 +55,7 @@ The workflow runs only when manually started from the GitHub Actions page. It
 validates the Python source, deploys with Docker Compose, checks `/health`, and
 removes unused Docker images/build cache older than 24 hours. It never prunes
 Docker volumes, and the deployment script excludes the database, uploads,
-generated scripts, audio, images, and videos from rsync deletion.
+generated scripts, audio, images, sounds, thumbnails, and videos from rsync deletion.
 
 ## Requirements
 
@@ -62,6 +63,7 @@ generated scripts, audio, images, and videos from rsync deletion.
 - FFmpeg available on `PATH`
 - A Gemini API key
 - A Cloudflare account with Workers AI access
+- An optional ElevenLabs API key for footsteps, movement, environment, and transition sounds
 
 FLUX.1 Schnell is a hosted diffusion model. Cloudflare includes 10,000 free
 AI Neurons per day; usage above that requires the Workers Paid plan. Current
@@ -75,6 +77,7 @@ GEMINI_API_KEY=your_gemini_key
 CLOUDFLARE_ACCOUNT_ID=your_cloudflare_account_id
 CLOUDFLARE_API_TOKEN=your_workers_ai_api_token
 CLOUDFLARE_IMAGE_MODEL=@cf/leonardo/lucid-origin
+ELEVENLABS_API_KEY=your_optional_elevenlabs_key
 ```
 
 Do not commit `.env` or share its contents.
@@ -93,9 +96,10 @@ run_pipeline.py      Stable command-line entry point
 generate_script.py   Stable script-generation entry point
 generate_audio.py    Stable narration entry point
 generate_images.py   Stable image-generation entry point
+generate_sounds.py   Optional story sound-effects entry point
 assemble_video.py    Stable video-assembly entry point
 
-data/ scripts/ audio/ images/ videos/ thumbnails/   Persistent runtime output
+data/ scripts/ audio/ images/ sounds/ videos/ thumbnails/   Persistent runtime output
 ```
 
 Implementation code lives under `src/`. The small root entry points preserve
@@ -122,8 +126,9 @@ Provide the topic and duration directly:
 $PYTHON run_pipeline.py "A forgotten lighthouse keeper" 2
 ```
 
-The duration is specified in minutes. The pipeline runs script, audio, images,
-and video assembly in order.
+The duration is specified in minutes. The pipeline runs script, narration, images,
+optional sound effects, and video assembly in order. If `ELEVENLABS_API_KEY` is not
+configured, the sound step reports that it was skipped and the video still completes.
 
 If a run stops after creating the script or audio, resume the newest project:
 
@@ -214,7 +219,29 @@ images/<script-name>/scene_plan.json
 images/<script-name>/thumbnail_source.jpg
 ```
 
-### 4. Assemble the final video
+### 4. Generate optional sound effects
+
+Add `ELEVENLABS_API_KEY` to `.env`, then run:
+
+```bash
+$PYTHON generate_sounds.py scripts/<script-name>.txt
+```
+
+Gemini selects a small number of meaningful footsteps, doors, movement, weather,
+nature, magic, or transition moments in `scene_plan.json`. ElevenLabs generates short
+MP3 cues, and interrupted runs reuse completed files. Sound generation is usage-billed;
+the current API charges 40 credits per generated second when duration is specified. The
+pipeline allows no more than one cue per two scenes and caps every project at 30 cues.
+Official API reference: https://elevenlabs.io/docs/api-reference/text-to-sound-effects/convert
+
+Output:
+
+```text
+sounds/<script-name>/cue_001.mp3
+sounds/<script-name>/sound_manifest.json
+```
+
+### 5. Assemble the final video
 
 Choose a script interactively:
 
@@ -237,6 +264,7 @@ The assembler adds:
 - Short five-word burned-in captions with a translucent background
 - A matching `.srt` subtitle file for YouTube accessibility
 - Consistent narration loudness and gentle frequency cleanup
+- Sparse story sounds mixed quietly beneath narration with short fades and peak limiting
 - H.264 video
 - AAC narration audio
 - Fast-start MP4 metadata
@@ -258,6 +286,7 @@ thumbnails/<script-name>.jpg
 scripts/  Generated narration text
 audio/    Final WAV narration and measured caption timing data
 images/   Scene images grouped by script
+sounds/   Optional generated effects and their timing manifest
 videos/   Finished captioned MP4 videos
 thumbnails/ Dedicated 16:9 video thumbnails
 ```
