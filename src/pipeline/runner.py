@@ -197,7 +197,13 @@ def main() -> None:
         )
     run_step(
         "3/4 Generating Cloudflare scene images",
-        [python, str(BASE_DIR / "generate_images.py"), str(script_path)],
+        [
+            python,
+            str(BASE_DIR / "generate_images.py"),
+            str(script_path),
+            "--title",
+            args.title,
+        ],
     )
     run_step(
         "4/4 Assembling captioned video",

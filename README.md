@@ -83,6 +83,7 @@ Do not commit `.env` or share its contents.
 ```text
 src/
   pipeline/   Script, audio, image, video, and orchestration implementation
+  ambient/    Reserved boundary for the upcoming non-narrated ambient workflow
   backend/    FastAPI server, database, worker, and publishing integrations
   web/        Templates and static assets
   project_paths.py   Shared locations for persistent and generated files
@@ -192,8 +193,10 @@ $PYTHON generate_images.py scripts/<script-name>.txt
 ```
 
 The current pacing is one image per 50 words, approximately six images for a
-two-minute narration. Existing scene files are skipped so interrupted runs can
-continue without paying for the same image twice.
+two-minute narration. Gemini first creates and saves a visual continuity plan,
+then Cloudflare renders each scene plus one dedicated thumbnail composition.
+Existing scene files and the thumbnail source are skipped so interrupted runs
+can continue without paying for the same image twice.
 
 Output:
 
@@ -201,6 +204,8 @@ Output:
 images/<script-name>/scene_001.jpg
 images/<script-name>/scene_002.jpg
 ...
+images/<script-name>/scene_plan.json
+images/<script-name>/thumbnail_source.jpg
 ```
 
 ### 4. Assemble the final video

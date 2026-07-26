@@ -169,6 +169,7 @@ def build_video_filter(
     scene_durations: list[float],
     caption_filename: str,
     scene_texts: list[str],
+    title_filename: str | None = None,
 ) -> tuple[str, list[float]]:
     """Build cinematic movement, contextual effects, fades, and captions."""
     transition = min(
@@ -221,8 +222,14 @@ def build_video_filter(
             y_offset = 0 if effect == "stars" else 245
             for point, (x, y, period, phase) in enumerate(EFFECT_POINTS):
                 size = 2 + (point % 2)
+                if effect == "stars":
+                    effect_x = str(x)
+                    effect_y = str(y)
+                else:
+                    effect_x = f"{x}+10*sin(t*0.35+{phase})"
+                    effect_y = f"{y + y_offset}-mod(t*5+{phase * 18:.1f},110)"
                 scene_filter += (
-                    f",drawbox=x={x}:y={y + y_offset}:w={size}:h={size}:"
+                    f",drawbox=x='{effect_x}':y='{effect_y}':w={size}:h={size}:"
                     f"color={color}@0.65:t=fill:"
                     f"enable='lt(mod(t+{phase},{period}),0.7)'"
                 )
@@ -243,6 +250,12 @@ def build_video_filter(
         )
         current_label = output_label
         current_duration += input_durations[index] - transition
+
+    if title_filename:
+        filters.append(
+            f"[{current_label}]subtitles=filename='{title_filename}'[titled]"
+        )
+        current_label = "titled"
 
     caption_style = (
         "FontName=Arial,FontSize=22,PrimaryColour=&H00FFFFFF,"
@@ -277,8 +290,51 @@ def thumbnail_title(title: str, script_stem: str) -> str:
     return r"\N".join(line.upper() for line in lines if line)
 
 
+def opening_title(title: str) -> str:
+    words = title.strip().split()[:10]
+    if not words:
+        return ""
+    split_at = (len(words) + 1) // 2
+    lines = [" ".join(words[:split_at]), " ".join(words[split_at:])]
+    return r"\N".join(line for line in lines if line)
+
+
+def safe_ass_text(value: str) -> str:
+    return value.replace("{", "(").replace("}", ")").replace("\n", " ")
+
+
+def write_opening_title_file(title: str, output_dir: Path) -> Path | None:
+    display_title = opening_title(title)
+    if not display_title:
+        return None
+    safe_title = safe_ass_text(display_title)
+    ass_content = f"""[Script Info]
+ScriptType: v4.00+
+PlayResX: {VIDEO_WIDTH}
+PlayResY: {VIDEO_HEIGHT}
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Opening,Arial,34,&H00FFFFFF,&H00FFFFFF,&H00101010,&H50000000,-1,0,0,0,100,100,1,0,1,2,1,7,52,52,54,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:00:00.35,0:00:05.50,Opening,,0,0,0,,{{\\fad(700,1000)}}{safe_title}
+"""
+    with tempfile.NamedTemporaryFile(
+        mode="w",
+        suffix=".ass",
+        prefix="opening_title_",
+        dir=output_dir,
+        encoding="utf-8",
+        delete=False,
+    ) as title_file:
+        title_file.write(ass_content)
+        return Path(title_file.name)
+
+
 def write_thumbnail_title_file(title: str, output_dir: Path) -> Path:
-    safe_title = title.replace("{", "(").replace("}", ")")
+    safe_title = safe_ass_text(title)
     ass_content = f"""[Script Info]
 ScriptType: v4.00+
 PlayResX: {VIDEO_WIDTH}
@@ -307,12 +363,15 @@ Dialogue: 0,0:00:00.00,0:00:05.00,Title,,0,0,0,,{safe_title}
 def render_thumbnail(
     ffmpeg_path: str,
     image_paths: list[Path],
+    thumbnail_source: Path | None,
     title: str,
     script_stem: str,
 ) -> Path:
     """Render a dedicated high-contrast 16:9 thumbnail from the richest scene."""
     THUMBNAILS_DIR.mkdir(parents=True, exist_ok=True)
-    source_image = max(image_paths, key=lambda path: path.stat().st_size)
+    source_image = thumbnail_source or max(
+        image_paths, key=lambda path: path.stat().st_size
+    )
     output_path = THUMBNAILS_DIR / f"{script_stem}.jpg"
     temporary_output = output_path.with_suffix(".rendering.jpg")
     title_path = write_thumbnail_title_file(
@@ -357,6 +416,7 @@ def render_video(
     script_text: str,
     output_path: Path,
     scene_texts: list[str],
+    title: str = "",
 ) -> None:
     """Render crossfaded images, captions, and narration using ffmpeg."""
     ffmpeg_path = shutil.which("ffmpeg")
@@ -369,10 +429,12 @@ def render_video(
         output_path.parent,
         audio_path.with_suffix(".timings.json"),
     )
+    title_path = write_opening_title_file(title, output_path.parent)
     video_filter, input_durations = build_video_filter(
         scene_durations,
         caption_path.name,
         scene_texts,
+        title_path.name if title_path else None,
     )
     temporary_output_path = output_path.with_suffix(".rendering.mp4")
     try:
@@ -428,6 +490,8 @@ def render_video(
         raise SystemExit(f"ffmpeg failed with exit code {exc.returncode}.") from exc
     finally:
         caption_path.unlink(missing_ok=True)
+        if title_path:
+            title_path.unlink(missing_ok=True)
 
 
 def main() -> None:
@@ -471,6 +535,14 @@ def main() -> None:
     )
     if not image_paths:
         raise SystemExit(f"No images found in {image_dir}")
+    thumbnail_source = next(
+        (
+            image_dir / f"thumbnail_source{suffix}"
+            for suffix in (".jpg", ".jpeg", ".png")
+            if (image_dir / f"thumbnail_source{suffix}").is_file()
+        ),
+        None,
+    )
 
     text = script_path.read_text(encoding="utf-8")
     scene_word_counts = count_scene_words(text)
@@ -501,10 +573,19 @@ def main() -> None:
     output_path = output_dir / f"{script_path.stem}.mp4"
 
     print(f"Rendering video to {output_path} (this can take a while)...")
-    render_video(image_paths, scene_durations, audio_path, text, output_path, scene_texts)
+    render_video(
+        image_paths,
+        scene_durations,
+        audio_path,
+        text,
+        output_path,
+        scene_texts,
+        args.title,
+    )
     thumbnail_path = render_thumbnail(
         shutil.which("ffmpeg") or "ffmpeg",
         image_paths,
+        thumbnail_source,
         args.title,
         script_path.stem,
     )

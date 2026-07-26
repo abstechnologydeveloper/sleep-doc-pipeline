@@ -19,6 +19,9 @@ from pathlib import Path
 from urllib import error, request
 
 from dotenv import load_dotenv
+from google import genai
+from google.genai import errors as genai_errors
+from google.genai import types
 
 from project_paths import IMAGES_DIR, PROJECT_ROOT, SCRIPTS_DIR
 
@@ -39,6 +42,8 @@ SAFETY_FALLBACK_PROMPT = (
     "quiet trees and distant hills, calm atmospheric lighting, soft muted colors, "
     "cinematic wide shot, no people, no text, no watermark, high detail"
 )
+SCENE_PLAN_FILENAME = "scene_plan.json"
+THUMBNAIL_STEM = "thumbnail_source"
 
 
 def split_into_scenes(text: str, words_per_scene: int = WORDS_PER_SCENE) -> list[str]:
@@ -60,6 +65,99 @@ def scene_to_prompt(scene_text: str) -> str:
     words = scene_text.split()
     snippet = " ".join(words[:40])
     return f"{snippet}{STYLE_SUFFIX}"
+
+
+def fallback_visual_plan(scenes: list[str]) -> dict:
+    return {
+        "visual_bible": "Consistent cinematic sleep-story artwork",
+        "scene_prompts": [scene_to_prompt(scene) for scene in scenes],
+        "thumbnail_prompt": scene_to_prompt(scenes[0]),
+    }
+
+
+def valid_visual_plan(plan: object, scene_count: int) -> bool:
+    return (
+        isinstance(plan, dict)
+        and isinstance(plan.get("scene_prompts"), list)
+        and len(plan["scene_prompts"]) == scene_count
+        and all(isinstance(prompt, str) and prompt.strip() for prompt in plan["scene_prompts"])
+        and isinstance(plan.get("thumbnail_prompt"), str)
+        and bool(plan["thumbnail_prompt"].strip())
+    )
+
+
+def create_visual_plan(
+    scenes: list[str], title: str, api_key: str, plan_path: Path
+) -> dict:
+    """Create and persist consistent visual prompts for every narration scene."""
+    if plan_path.is_file():
+        try:
+            saved_plan = json.loads(plan_path.read_text(encoding="utf-8"))
+            if valid_visual_plan(saved_plan, len(scenes)):
+                print("Using saved cinematic scene plan.")
+                return saved_plan
+        except (OSError, json.JSONDecodeError):
+            pass
+
+    scene_list = "\n".join(
+        f"{index}. {scene[:700]}" for index, scene in enumerate(scenes, start=1)
+    )
+    prompt = f"""Act as a cinematic art director for an original sleep-story video.
+Create a visual continuity bible, one image prompt for every numbered narration scene,
+and one separate thumbnail prompt. Preserve recurring characters, clothing, architecture,
+weather, time of day, and color palette across all scenes. Describe visible action and
+composition rather than abstract narration. Keep motion calm and imagery suitable for sleep.
+
+The generated images will be square and cropped to 16:9 later. Keep important subjects in the
+central safe area. For the thumbnail, place one strong focal subject on the right and leave
+clean darker space on the left for title text. Do not put words, letters, logos, watermarks,
+frames, split screens, collages, gore, nudity, or copyrighted characters in any prompt.
+
+Title: {title or '(derive from the story)'}
+Narration scenes:
+{scene_list}
+
+Return JSON only with:
+- visual_bible: a concise string
+- scene_prompts: an array of exactly {len(scenes)} detailed strings in scene order
+- thumbnail_prompt: one detailed string
+"""
+
+    try:
+        client = genai.Client(api_key=api_key)
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json",
+                temperature=0.65,
+            ),
+        )
+        plan = json.loads(response.text or "")
+        if not valid_visual_plan(plan, len(scenes)):
+            raise ValueError("Gemini returned an incomplete scene plan")
+        plan["scene_prompts"] = [
+            f"{scene_prompt[:1750]}{STYLE_SUFFIX}"
+            for scene_prompt in plan["scene_prompts"]
+        ]
+        plan["thumbnail_prompt"] = (
+            f"{plan['thumbnail_prompt'][:1750]}{STYLE_SUFFIX}"
+        )
+        plan_path.write_text(json.dumps(plan, indent=2), encoding="utf-8")
+        print(f"Saved cinematic scene plan: {plan_path.name}")
+        return plan
+    except (
+        OSError,
+        ValueError,
+        TypeError,
+        json.JSONDecodeError,
+        ConnectionError,
+        TimeoutError,
+        genai_errors.ClientError,
+        genai_errors.ServerError,
+    ) as exc:
+        print(f"Warning: cinematic planning failed ({exc}); using narration excerpts.")
+        return fallback_visual_plan(scenes)
 
 
 def request_image(account_id: str, api_token: str, prompt: str) -> tuple[bytes, str]:
@@ -191,6 +289,11 @@ def main() -> None:
         nargs="?",
         help="Path to the .txt script file; omit to select one interactively",
     )
+    parser.add_argument(
+        "--title",
+        default="",
+        help="Optional post title used to compose the dedicated thumbnail",
+    )
     args = parser.parse_args()
 
     script_path = select_script(args.script_path)
@@ -214,8 +317,19 @@ def main() -> None:
 
     image_dir = IMAGES_DIR / script_path.stem
     image_dir.mkdir(parents=True, exist_ok=True)
+    gemini_api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+    visual_plan = (
+        create_visual_plan(
+            scenes,
+            args.title,
+            gemini_api_key,
+            image_dir / SCENE_PLAN_FILENAME,
+        )
+        if gemini_api_key
+        else fallback_visual_plan(scenes)
+    )
 
-    for i, scene_text in enumerate(scenes, start=1):
+    for i, _scene_text in enumerate(scenes, start=1):
         image_stem = f"scene_{i:03d}"
         existing_image = next(
             (
@@ -229,12 +343,33 @@ def main() -> None:
             print(f"  Scene {i}/{len(scenes)} already done, skipping.")
             continue
 
-        prompt = scene_to_prompt(scene_text)
+        prompt = visual_plan["scene_prompts"][i - 1]
         print(f"  Generating scene {i}/{len(scenes)}: {prompt[:70]}...")
 
         image_data, suffix = generate_image(account_id, api_token, prompt)
         image_path = image_dir / f"{image_stem}{suffix}"
         image_path.write_bytes(image_data)
+
+    existing_thumbnail = next(
+        (
+            image_dir / f"{THUMBNAIL_STEM}{suffix}"
+            for suffix in (".jpg", ".jpeg", ".png")
+            if (image_dir / f"{THUMBNAIL_STEM}{suffix}").exists()
+        ),
+        None,
+    )
+    if existing_thumbnail:
+        print("  Dedicated thumbnail source already done, skipping.")
+    else:
+        print("  Generating dedicated thumbnail source...")
+        thumbnail_data, thumbnail_suffix = generate_image(
+            account_id,
+            api_token,
+            visual_plan["thumbnail_prompt"],
+        )
+        (image_dir / f"{THUMBNAIL_STEM}{thumbnail_suffix}").write_bytes(
+            thumbnail_data
+        )
 
     print(f"\nAll images saved to {image_dir}")
     print(f"Total scenes: {len(scenes)}")
