@@ -18,6 +18,17 @@
     if (event.key === "Escape") closeSidebar();
   });
 
+  document.querySelector("[data-copy-share]")?.addEventListener("click", async (event) => {
+    const input = document.querySelector("[data-share-url]");
+    if (!input) return;
+    try {
+      await navigator.clipboard.writeText(input.value);
+      event.currentTarget.textContent = "Copied";
+    } catch {
+      input.select();
+    }
+  });
+
   document.querySelectorAll("[data-bulk-jobs]").forEach((form) => {
     const selectAll = form.querySelector("[data-select-all]");
     const selections = [...form.querySelectorAll("[data-job-select]")];

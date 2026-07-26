@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <title>{{ job.title }} · Sleep Studio</title>
+  <meta property="og:title" content="{{ job.title }}">
+  <meta property="og:type" content="video.other">
+  <meta property="og:site_name" content="Sleep Studio">
+  <meta property="og:url" content="{{ request.url_for('public_share', token=token) }}">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="{{ job.title }}">
+  {% if job.description %}<meta property="og:description" content="{{ job.description }}">{% endif %}
+  {% if job.description %}<meta name="twitter:description" content="{{ job.description }}">{% endif %}
+  {% if thumbnail_ready %}
+  <meta property="og:image" content="{{ request.url_for('public_share_thumbnail', token=token) }}">
+  <meta property="og:image:secure_url" content="{{ request.url_for('public_share_thumbnail', token=token) }}">
+  <meta property="og:image:type" content="image/jpeg">
+  <meta property="og:image:width" content="1280">
+  <meta property="og:image:height" content="720">
+  <meta property="og:image:alt" content="Thumbnail for {{ job.title }}">
+  <meta name="twitter:image" content="{{ request.url_for('public_share_thumbnail', token=token) }}">
+  {% endif %}
+  <link rel="stylesheet" href="/static/style.css?v=20260726-3">
+</head>
+<body>
+  <main class="auth-shell">
+    <div class="public-share-shell">
+      <header class="public-share-header"><span class="brand-mark">S</span><strong>Sleep Studio</strong><span>Shared video</span></header>
+      <section class="panel public-share-panel">
+        <h1>{{ job.title }}</h1>
+        {% if job.description %}<p>{{ job.description }}</p>{% endif %}
+        <video class="video-player" controls preload="metadata" {% if thumbnail_ready %}poster="/share/{{ token }}/thumbnail"{% endif %} src="/share/{{ token }}/video"></video>
+        <div class="action-row"><a class="button primary" href="/share/{{ token }}/video" download>Download video</a>{% if thumbnail_ready %}<a class="button secondary" href="/share/{{ token }}/thumbnail" download>Download thumbnail</a>{% endif %}</div>
+      </section>
+    </div>
+  </main>
+</body>
+</html>

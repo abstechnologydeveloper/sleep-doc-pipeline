@@ -44,6 +44,7 @@ def initialize() -> None:
                 source_path TEXT,
                 video_path TEXT,
                 script_path TEXT,
+                share_token TEXT,
                 log_path TEXT,
                 error TEXT,
                 created_at TEXT NOT NULL,
@@ -70,6 +71,11 @@ def initialize() -> None:
         }
         if "script_path" not in columns:
             db.execute("ALTER TABLE jobs ADD COLUMN script_path TEXT")
+        if "share_token" not in columns:
+            db.execute("ALTER TABLE jobs ADD COLUMN share_token TEXT")
+        db.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS jobs_share_token ON jobs(share_token)"
+        )
 
 
 def create_job(**values) -> int:
@@ -171,6 +177,21 @@ def get_job(job_id: int):
             "SELECT * FROM publications WHERE job_id = ? ORDER BY platform", (job_id,)
         ).fetchall()
         return job, publications
+
+
+def get_job_by_share_token(token: str):
+    with connect() as db:
+        return db.execute(
+            "SELECT * FROM jobs WHERE share_token = ?", (token,)
+        ).fetchone()
+
+
+def set_job_share_token(job_id: int, token: str | None) -> None:
+    with connect() as db:
+        db.execute(
+            "UPDATE jobs SET share_token = ?, updated_at = ? WHERE id = ?",
+            (token, utc_now(), job_id),
+        )
 
 
 def claim_job():

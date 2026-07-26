@@ -37,6 +37,7 @@ JOB_STATUSES = (
     "failed",
     "cancel_requested",
 )
+SHAREABLE_STATUSES = {"completed", "published", "waiting_for_connections"}
 
 
 def valid_admin_password(password: str) -> bool:
@@ -114,6 +115,15 @@ def reusable_media_job(job) -> bool:
         return False
     return job["kind"] == "automatic" or (
         job["kind"] == "manual" and not platforms
+    )
+
+
+def shareable_job(job) -> bool:
+    return bool(
+        job
+        and job["status"] in SHAREABLE_STATUSES
+        and job["video_path"]
+        and Path(job["video_path"]).is_file()
     )
 
 
@@ -487,8 +497,74 @@ def job_detail(request: Request, job_id: int):
             job=job,
             publications=publications,
             thumbnail_ready=bool(thumbnail_path and thumbnail_path.is_file()),
+            shareable=shareable_job(job),
+            share_url=(
+                str(request.url_for("public_share", token=job["share_token"]))
+                if job["share_token"]
+                else None
+            ),
         ),
     )
+
+
+@app.post("/jobs/{job_id}/share")
+def create_share_link(request: Request, job_id: int, csrf: str = Form()):
+    redirect = login_required(request)
+    if redirect:
+        return redirect
+    verify_csrf(request, csrf)
+    job, _ = database.get_job(job_id)
+    if not shareable_job(job):
+        return HTMLResponse("Only finished videos can be shared", status_code=409)
+    if not job["share_token"]:
+        database.set_job_share_token(job_id, secrets.token_urlsafe(24))
+    return RedirectResponse(f"/jobs/{job_id}", status_code=303)
+
+
+@app.post("/jobs/{job_id}/share/revoke")
+def revoke_share_link(request: Request, job_id: int, csrf: str = Form()):
+    redirect = login_required(request)
+    if redirect:
+        return redirect
+    verify_csrf(request, csrf)
+    database.set_job_share_token(job_id, None)
+    return RedirectResponse(f"/jobs/{job_id}", status_code=303)
+
+
+@app.get("/share/{token}", response_class=HTMLResponse, name="public_share")
+def public_share(request: Request, token: str):
+    job = database.get_job_by_share_token(token)
+    if not shareable_job(job):
+        return HTMLResponse("Shared video not found", status_code=404)
+    thumbnail_path = THUMBNAILS_DIR / f"{Path(job['video_path']).stem}.jpg"
+    return TEMPLATES.TemplateResponse(
+        request,
+        "share.html",
+        {
+            "job": job,
+            "token": token,
+            "thumbnail_ready": thumbnail_path.is_file(),
+        },
+    )
+
+
+@app.get("/share/{token}/video")
+def public_share_video(token: str):
+    job = database.get_job_by_share_token(token)
+    if not shareable_job(job):
+        return HTMLResponse("Shared video not found", status_code=404)
+    return FileResponse(job["video_path"], media_type="video/mp4")
+
+
+@app.get("/share/{token}/thumbnail")
+def public_share_thumbnail(token: str):
+    job = database.get_job_by_share_token(token)
+    if not shareable_job(job):
+        return HTMLResponse("Shared thumbnail not found", status_code=404)
+    thumbnail_path = THUMBNAILS_DIR / f"{Path(job['video_path']).stem}.jpg"
+    if not thumbnail_path.is_file():
+        return HTMLResponse("Shared thumbnail not found", status_code=404)
+    return FileResponse(thumbnail_path, media_type="image/jpeg")
 
 
 @app.post("/jobs/{job_id}/retry")

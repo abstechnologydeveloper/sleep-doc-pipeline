@@ -15,6 +15,19 @@
     {% if job.video_path %}
       <video class="video-player" controls preload="metadata" src="/jobs/{{ job.id }}/video"></video>
       <div class="action-row"><a class="button primary" href="/jobs/{{ job.id }}/video" download>Download video</a>{% if thumbnail_ready %}<a class="button secondary" href="/jobs/{{ job.id }}/thumbnail" download>Download thumbnail</a>{% endif %}</div>
+      {% if shareable %}
+      <div class="share-panel">
+        <strong>Public sharing</strong>
+        {% if share_url %}
+          <p>Anyone with this link can watch and download the finished video.</p>
+          <div class="share-link-row"><input type="text" value="{{ share_url }}" readonly data-share-url><button class="button secondary" type="button" data-copy-share>Copy link</button></div>
+          <form method="post" action="/jobs/{{ job.id }}/share/revoke"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="text-button share-revoke" type="submit">Disable public link</button></form>
+        {% else %}
+          <p>Create a private-to-guess link for people to watch this finished video without signing in.</p>
+          <form method="post" action="/jobs/{{ job.id }}/share"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="button secondary" type="submit">Create public link</button></form>
+        {% endif %}
+      </div>
+      {% endif %}
     {% else %}
       <div class="processing-state"><span class="spinner"></span><strong>Output is not ready yet</strong><p>This page will refresh automatically when the video becomes available.</p></div>
     {% endif %}

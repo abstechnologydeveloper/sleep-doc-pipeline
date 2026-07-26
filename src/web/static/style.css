@@ -121,6 +121,18 @@ legend { padding: 0 5px; color: #c9ced8; font-size: 12px; }
 .button.danger { border-color: #723d44; background: #381e23; color: #ffaaaa; }
 .button:disabled { cursor: not-allowed; opacity: .45; }
 .action-row { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 14px; }
+.share-panel { margin-top: 16px; padding: 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel-soft); }
+.share-panel > strong { font-size: 13px; }
+.share-panel p { margin: 5px 0 11px; font-size: 11px; }
+.share-link-row { display: flex; gap: 8px; }
+.share-link-row input { min-width: 0; }
+.share-link-row .button { flex: 0 0 auto; }
+.share-revoke { margin-top: 10px; color: #ef9898; }
+.public-share-shell { width: min(100%, 980px); }
+.public-share-header { display: flex; align-items: center; gap: 10px; margin-bottom: 18px; }
+.public-share-header span:last-child { color: var(--muted); font-size: 12px; }
+.public-share-panel h1 { margin: 0 0 8px; font-size: clamp(22px, 4vw, 34px); }
+.public-share-panel > p { margin-bottom: 18px; }
 
 .table-wrap { overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
@@ -219,4 +231,5 @@ tr:last-child td { border-bottom: 0; }
   .panel { padding: 16px; }
   .media-grid { grid-template-columns: 1fr 1fr; }
   .job-heading .status { margin-top: 2px; }
+  .share-link-row { align-items: stretch; flex-direction: column; }
 }
