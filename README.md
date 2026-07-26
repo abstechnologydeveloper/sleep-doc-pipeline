@@ -273,6 +273,7 @@ The assembler adds:
 - AAC narration audio
 - Fast-start MP4 metadata
 - A separate high-contrast 1280×720 JPEG thumbnail with a short title
+- A colorful curiosity-focused thumbnail composition with a truthful 2-5 word hook
 
 If fewer images exist than expected, the available images are distributed
 evenly instead of failing.

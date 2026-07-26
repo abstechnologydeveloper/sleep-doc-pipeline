@@ -81,6 +81,7 @@ def fallback_visual_plan(scenes: list[str]) -> dict:
             for _scene in scenes
         ],
         "sound_cues": [],
+        "thumbnail_hook": "WHAT HAPPENS NEXT?",
         "thumbnail_prompt": scene_to_prompt(scenes[0]),
     }
 
@@ -96,6 +97,8 @@ def valid_visual_plan(plan: object, scene_count: int) -> bool:
         and all(isinstance(direction, dict) for direction in plan["scene_directions"])
         and "sound_cues" in plan
         and isinstance(plan.get("sound_cues"), list)
+        and isinstance(plan.get("thumbnail_hook"), str)
+        and bool(plan["thumbnail_hook"].strip())
         and isinstance(plan.get("thumbnail_prompt"), str)
         and bool(plan["thumbnail_prompt"].strip())
     )
@@ -133,10 +136,19 @@ and palette across every scene. Describe visible action, camera distance, lens f
 composition rather than copying abstract narration. Keep every image age-appropriate.
 
 Compose every scene for cinematic 16:9, but keep important subjects inside a central safe area
-so the low-cost fallback model can also be cropped safely. For the thumbnail, place one strong
-focal subject on the right and leave clean darker space on the left for title text. Do not put
-words, letters, logos, watermarks, frames, split screens, collages, gore, nudity, or copyrighted
-characters in any prompt.
+so the low-cost fallback model can also be cropped safely. Treat the thumbnail as a separate
+YouTube advertisement for the story, not a random scene. It must spark honest curiosity by
+showing one strange clue, unexpected discovery, expressive reaction, looming question, or
+unresolved moment without revealing the answer. Use a bold, colorful complementary palette,
+bright focal lighting, deep contrast, clean shapes, and one instantly readable subject. Keep it
+vivid and inviting rather than muddy, grey, overly serious, frightening, or visually busy.
+Place the focal subject on the right and leave clean darker space on the left for headline text.
+Do not put words, letters, logos, watermarks, frames, split screens, collages, gore, nudity, or
+copyrighted characters in any prompt.
+
+Also write a thumbnail hook of 2 to 5 simple words. It should create a truthful curiosity gap
+that the story answers, preferably as a short question when natural. Do not merely repeat the
+video title. Avoid vague hooks, fake danger, spoilers, difficult words, and exaggerated clickbait.
 
 Sound design must support the story without competing with narration. Choose only clear,
 visible or strongly implied story moments such as soft footsteps, a door opening, cloth or
@@ -160,6 +172,7 @@ Return JSON only with:
 - sound_cues: a sparse array of objects containing scene_index (1-based), position (a number
   from 0 to 1 within that scene), prompt (a concise sound-only description), duration_seconds
   (0.5 to 4.0), volume (0.04 to 0.16), and kind (action, environment, or transition)
+- thumbnail_hook: a 2-to-5-word curiosity headline, with no quotation marks
 - thumbnail_prompt: one detailed string
 """
 
@@ -183,6 +196,8 @@ Return JSON only with:
         plan["thumbnail_prompt"] = (
             f"{plan['thumbnail_prompt'][:1750]}{STYLE_SUFFIX}"
         )
+        hook = str(plan.get("thumbnail_hook", "")).strip().strip('"\'')
+        plan["thumbnail_hook"] = " ".join(hook.split()[:5]).upper()
         plan_path.write_text(json.dumps(plan, indent=2), encoding="utf-8")
         print(f"Saved cinematic scene plan: {plan_path.name}")
         return plan

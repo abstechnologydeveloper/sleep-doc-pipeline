@@ -502,13 +502,19 @@ def retry(request: Request, job_id: int, csrf: str = Form()):
 
 
 @app.post("/jobs/{job_id}/delete")
-def delete_job(request: Request, job_id: int, csrf: str = Form()):
+def delete_job(
+    request: Request,
+    job_id: int,
+    csrf: str = Form(),
+    return_to: str = Form("/jobs"),
+):
     redirect = login_required(request)
     if redirect:
         return redirect
     verify_csrf(request, csrf)
     database.request_job_deletion(job_id)
-    return RedirectResponse("/", status_code=303)
+    safe_return = return_to if return_to in {"/", "/storytelling", "/jobs"} else "/jobs"
+    return RedirectResponse(safe_return, status_code=303)
 
 
 @app.get("/jobs/{job_id}/video")

@@ -117,6 +117,18 @@ def load_scene_directions(image_dir: Path, scene_count: int) -> list[dict]:
         return default
 
 
+def load_thumbnail_hook(image_dir: Path) -> str:
+    plan_path = image_dir / "scene_plan.json"
+    if not plan_path.is_file():
+        return ""
+    try:
+        payload = json.loads(plan_path.read_text(encoding="utf-8"))
+        hook = str(payload.get("thumbnail_hook", "")).strip()
+        return " ".join(hook.split()[:5])
+    except (OSError, json.JSONDecodeError, TypeError):
+        return ""
+
+
 def load_sound_cues(script_stem: str, scene_durations: list[float]) -> list[dict]:
     """Load generated effects and convert scene-relative positions to timestamps."""
     sound_dir = SOUNDS_DIR / script_stem
@@ -496,6 +508,7 @@ def render_thumbnail(
     thumbnail_source: Path | None,
     title: str,
     script_stem: str,
+    curiosity_hook: str = "",
 ) -> Path:
     """Render a dedicated high-contrast 16:9 thumbnail from the richest scene."""
     THUMBNAILS_DIR.mkdir(parents=True, exist_ok=True)
@@ -505,13 +518,13 @@ def render_thumbnail(
     output_path = THUMBNAILS_DIR / f"{script_stem}.jpg"
     temporary_output = output_path.with_suffix(".rendering.jpg")
     title_path = write_thumbnail_title_file(
-        thumbnail_title(title, script_stem), THUMBNAILS_DIR
+        thumbnail_title(curiosity_hook or title, script_stem), THUMBNAILS_DIR
     )
     thumbnail_filter = (
         f"scale={VIDEO_WIDTH}:{VIDEO_HEIGHT}:force_original_aspect_ratio=increase,"
         f"crop={VIDEO_WIDTH}:{VIDEO_HEIGHT},"
-        "eq=saturation=1.2:contrast=1.08:brightness=-0.015,"
-        "unsharp=5:5:0.6:5:5:0,vignette=PI/5,"
+        "eq=saturation=1.32:contrast=1.13:brightness=0.01,"
+        "unsharp=5:5:0.75:5:5:0,vignette=PI/6,"
         f"subtitles=filename='{title_path.name}'"
     )
     try:
@@ -724,6 +737,7 @@ def main() -> None:
     scene_word_counts = count_scene_words(text)
     scene_texts = split_scene_text(text)
     scene_directions = load_scene_directions(image_dir, len(scene_word_counts))
+    curiosity_hook = load_thumbnail_hook(image_dir)
 
     if len(scene_word_counts) != len(image_paths):
         print(
@@ -771,6 +785,7 @@ def main() -> None:
         thumbnail_source,
         args.title,
         script_path.stem,
+        curiosity_hook,
     )
 
     print(f"\nDone. Saved video to {output_path}")

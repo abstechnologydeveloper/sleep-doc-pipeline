@@ -1,6 +1,6 @@
 <div class="table-wrap">
   <table class="job-table">
-    <thead><tr><th>Job</th><th>Workflow</th><th>Title</th><th>Status</th><th>Created</th></tr></thead>
+    <thead><tr><th>Job</th><th>Workflow</th><th>Title</th><th>Status</th><th>Created</th><th></th></tr></thead>
     <tbody>
     {% for job in jobs %}
       <tr data-job-id="{{ job.id }}">
@@ -13,9 +13,16 @@
         <td data-job-title>{{ job.title or 'Preparing…' }}</td>
         <td><span class="status status-{{ job.status }}" data-job-status>{{ job.status|replace('_', ' ')|title }}</span></td>
         <td class="muted">{{ job.created_at[:16]|replace('T', ' ') }}</td>
+        <td class="row-actions">
+          <form method="post" action="/jobs/{{ job.id }}/delete" onsubmit="return confirm('{{ 'Cancel and delete this running job?' if job.status in ['processing','publishing','cancel_requested'] else 'Delete this job?' }}')">
+            <input type="hidden" name="csrf" value="{{ csrf }}">
+            <input type="hidden" name="return_to" value="{{ request.url.path }}">
+            <button class="row-delete" type="submit">{{ 'Cancel' if job.status in ['processing','publishing','cancel_requested'] else 'Delete' }}</button>
+          </form>
+        </td>
       </tr>
     {% else %}
-      <tr><td colspan="5" class="empty-state">No jobs match this view.</td></tr>
+      <tr><td colspan="6" class="empty-state">No jobs match this view.</td></tr>
     {% endfor %}
     </tbody>
   </table>

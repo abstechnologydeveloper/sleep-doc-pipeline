@@ -130,6 +130,9 @@ tr:last-child td { border-bottom: 0; }
 .muted { color: var(--muted); }
 .empty-state { padding: 26px; color: var(--muted); text-align: center; }
 .filter-bar { display: grid; grid-template-columns: 210px 230px auto; gap: 12px; align-items: end; margin-bottom: 18px; }
+.row-actions { width: 1%; text-align: right; }
+.row-delete { padding: 5px 8px; border: 1px solid #63383e; border-radius: 6px; background: transparent; color: #ef9898; cursor: pointer; font-size: 11px; }
+.row-delete:hover { background: #391e23; color: #ffc0c0; }
 
 .status { display: inline-flex; align-items: center; width: max-content; padding: 4px 8px; border-radius: 999px; background: #303642; color: #cbd1dd; font-size: 10px; font-weight: 750; white-space: nowrap; }
 .status-completed, .status-published { background: #163b2f; color: #85e2b9; }
