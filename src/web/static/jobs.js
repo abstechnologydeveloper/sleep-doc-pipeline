@@ -18,6 +18,26 @@
     if (event.key === "Escape") closeSidebar();
   });
 
+  document.querySelectorAll("[data-bulk-jobs]").forEach((form) => {
+    const selectAll = form.querySelector("[data-select-all]");
+    const selections = [...form.querySelectorAll("[data-job-select]")];
+    const deleteButton = form.querySelector("[data-delete-selected]");
+    const selectionCount = form.querySelector("[data-selection-count]");
+    const updateSelection = () => {
+      const checked = selections.filter((input) => input.checked).length;
+      selectionCount.textContent = `${checked} selected`;
+      deleteButton.disabled = checked === 0;
+      selectAll.checked = selections.length > 0 && checked === selections.length;
+      selectAll.indeterminate = checked > 0 && checked < selections.length;
+    };
+    selectAll?.addEventListener("change", () => {
+      selections.forEach((input) => { input.checked = selectAll.checked; });
+      updateSelection();
+    });
+    selections.forEach((input) => input.addEventListener("change", updateSelection));
+    updateSelection();
+  });
+
   const dashboardRows = [...document.querySelectorAll("[data-job-id]")]
     .map((row) => ({ id: Number(row.dataset.jobId), row }))
     .filter((item) => item.id);

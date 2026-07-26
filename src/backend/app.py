@@ -517,6 +517,27 @@ def delete_job(
     return RedirectResponse(safe_return, status_code=303)
 
 
+@app.post("/jobs/delete-selected")
+async def delete_selected_jobs(request: Request):
+    redirect = login_required(request)
+    if redirect:
+        return redirect
+    form = await request.form()
+    verify_csrf(request, str(form.get("csrf", "")))
+    job_ids = []
+    for raw_id in form.getlist("job_ids"):
+        try:
+            job_id = int(str(raw_id))
+        except (TypeError, ValueError):
+            continue
+        if job_id > 0:
+            job_ids.append(job_id)
+    database.request_jobs_deletion(job_ids)
+    return_to = str(form.get("return_to", "/jobs"))
+    safe_return = return_to if return_to in {"/", "/storytelling", "/jobs"} else "/jobs"
+    return RedirectResponse(safe_return, status_code=303)
+
+
 @app.get("/jobs/{job_id}/video")
 def job_video(request: Request, job_id: int):
     redirect = login_required(request)

@@ -232,6 +232,27 @@ def request_job_deletion(job_id: int) -> None:
             db.execute("DELETE FROM jobs WHERE id = ?", (job_id,))
 
 
+def request_jobs_deletion(job_ids: list[int]) -> None:
+    """Delete idle jobs and request cancellation for running jobs."""
+    unique_ids = sorted(set(job_ids))
+    if not unique_ids:
+        return
+    now = utc_now()
+    placeholders = ",".join("?" for _job_id in unique_ids)
+    with connect() as db:
+        db.execute(
+            f"""UPDATE jobs SET status='cancel_requested', updated_at=?
+            WHERE id IN ({placeholders})
+            AND status IN ('processing', 'publishing', 'cancel_requested')""",
+            (now, *unique_ids),
+        )
+        db.execute(
+            f"""DELETE FROM jobs WHERE id IN ({placeholders})
+            AND status NOT IN ('processing', 'publishing', 'cancel_requested')""",
+            unique_ids,
+        )
+
+
 def cancellation_requested(job_id: int) -> bool:
     with connect() as db:
         job = db.execute("SELECT status FROM jobs WHERE id = ?", (job_id,)).fetchone()

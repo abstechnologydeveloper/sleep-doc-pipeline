@@ -1,9 +1,17 @@
-<div class="table-wrap">
+<form method="post" action="/jobs/delete-selected" class="bulk-jobs-form" data-bulk-jobs onsubmit="return !event.submitter.matches('[data-delete-selected]') || confirm('Delete the selected jobs? Running jobs will be cancelled.')">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <input type="hidden" name="return_to" value="{{ request.url.path }}">
+  <div class="bulk-toolbar">
+    <span data-selection-count>0 selected</span>
+    <button class="row-delete" type="submit" data-delete-selected disabled>Delete selected</button>
+  </div>
+  <div class="table-wrap">
   <table class="job-table">
-    <thead><tr><th>Job</th><th>Workflow</th><th>Title</th><th>Status</th><th>Created</th><th></th></tr></thead>
+    <thead><tr><th class="select-column"><input type="checkbox" data-select-all aria-label="Select all visible jobs"></th><th>Job</th><th>Workflow</th><th>Title</th><th>Status</th><th>Created</th><th></th></tr></thead>
     <tbody>
     {% for job in jobs %}
       <tr data-job-id="{{ job.id }}">
+        <td class="select-column"><input type="checkbox" name="job_ids" value="{{ job.id }}" data-job-select aria-label="Select job {{ job.id }}"></td>
         <td><a href="/jobs/{{ job.id }}">#{{ job.id }}</a></td>
         <td>
           {% if job.kind == 'automatic' %}Storytelling
@@ -14,16 +22,13 @@
         <td><span class="status status-{{ job.status }}" data-job-status>{{ job.status|replace('_', ' ')|title }}</span></td>
         <td class="muted">{{ job.created_at[:16]|replace('T', ' ') }}</td>
         <td class="row-actions">
-          <form method="post" action="/jobs/{{ job.id }}/delete" onsubmit="return confirm('{{ 'Cancel and delete this running job?' if job.status in ['processing','publishing','cancel_requested'] else 'Delete this job?' }}')">
-            <input type="hidden" name="csrf" value="{{ csrf }}">
-            <input type="hidden" name="return_to" value="{{ request.url.path }}">
-            <button class="row-delete" type="submit">{{ 'Cancel' if job.status in ['processing','publishing','cancel_requested'] else 'Delete' }}</button>
-          </form>
+          <button class="row-delete" type="submit" formaction="/jobs/{{ job.id }}/delete" onclick="return confirm('{{ 'Cancel and delete this running job?' if job.status in ['processing','publishing','cancel_requested'] else 'Delete this job?' }}')">{{ 'Cancel' if job.status in ['processing','publishing','cancel_requested'] else 'Delete' }}</button>
         </td>
       </tr>
     {% else %}
-      <tr><td colspan="6" class="empty-state">No jobs match this view.</td></tr>
+      <tr><td colspan="7" class="empty-state">No jobs match this view.</td></tr>
     {% endfor %}
     </tbody>
   </table>
 </div>
+</form>
