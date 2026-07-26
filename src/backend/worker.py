@@ -7,7 +7,8 @@ import threading
 import time
 from pathlib import Path
 
-from project_paths import DATA_DIR, PROJECT_ROOT, VIDEOS_DIR
+from project_paths import DATA_DIR, PROJECT_ROOT, SCRIPTS_DIR, VIDEOS_DIR
+from pipeline.script import safe_topic_slug
 
 from . import database
 from .content import generate_post_metadata
@@ -29,17 +30,39 @@ def newest_video(before: set[Path]) -> Path:
     return max(candidates, key=lambda path: path.stat().st_mtime_ns)
 
 
+def resumable_script(job) -> Path | None:
+    configured = job.get("script_path")
+    if configured:
+        script_path = Path(configured)
+        if script_path.is_file():
+            return script_path.resolve()
+
+    if not job.get("log_path") or not job.get("topic"):
+        return None
+    slug = safe_topic_slug(job["topic"])
+    candidates = [
+        path for path in SCRIPTS_DIR.glob(f"*_{slug}.txt") if path.is_file()
+    ]
+    return (
+        max(candidates, key=lambda path: path.stat().st_mtime_ns).resolve()
+        if candidates
+        else None
+    )
+
+
 def run_automatic(job, log_file) -> Path:
-    existing = set(VIDEOS_DIR.glob("*.mp4"))
+    existing_videos = set(VIDEOS_DIR.glob("*.mp4"))
+    existing_scripts = set(SCRIPTS_DIR.glob("*.txt"))
+    script_path = resumable_script(job)
+    command = [sys.executable, str(BASE_DIR / "run_pipeline.py")]
+    if script_path:
+        print(f"Resuming saved script: {script_path.name}", file=log_file, flush=True)
+        command.extend(["--resume-script", str(script_path)])
+    else:
+        command.extend([job["topic"], str(job["minutes"])])
+    command.extend(["--title", job["title"]])
     process = subprocess.Popen(
-        [
-            sys.executable,
-            str(BASE_DIR / "run_pipeline.py"),
-            job["topic"],
-            str(job["minutes"]),
-            "--title",
-            job["title"],
-        ],
+        command,
         cwd=BASE_DIR, stdout=log_file, stderr=subprocess.STDOUT, start_new_session=True,
     )
     while process.poll() is None:
@@ -54,9 +77,25 @@ def run_automatic(job, log_file) -> Path:
                 process.wait()
             raise JobCancelled
         time.sleep(1)
+    if not script_path:
+        new_scripts = [
+            path for path in SCRIPTS_DIR.glob("*.txt") if path not in existing_scripts
+        ]
+        if new_scripts:
+            script_path = max(
+                new_scripts, key=lambda path: path.stat().st_mtime_ns
+            ).resolve()
+    if script_path:
+        database.update_job(
+            job["id"], "processing", script_path=str(script_path)
+        )
     if process.returncode:
         raise subprocess.CalledProcessError(process.returncode, process.args)
-    return newest_video(existing)
+    if script_path:
+        expected_video = VIDEOS_DIR / f"{script_path.stem}.mp4"
+        if expected_video.is_file():
+            return expected_video
+    return newest_video(existing_videos)
 
 
 def process_job(job) -> None:

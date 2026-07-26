@@ -91,11 +91,14 @@ def generate_chunk_audio(client: genai.Client, text: str) -> bytes:
             genai_errors.ClientError,
             ConnectionError,
             TimeoutError,
+            RuntimeError,
         ) as exc:
             last_error = exc
+            if attempt == MAX_RETRIES:
+                break
             delay = RETRY_BASE_DELAY * (2 ** (attempt - 1))
             print(
-                f"    network/API error on attempt {attempt}/{MAX_RETRIES} "
+                f"    audio response error on attempt {attempt}/{MAX_RETRIES} "
                 f"({exc}). Retrying in {delay}s..."
             )
             time.sleep(delay)

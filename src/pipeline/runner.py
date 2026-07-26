@@ -52,13 +52,22 @@ def parse_args() -> argparse.Namespace:
         help="Resume the newest script instead of generating a new one",
     )
     parser.add_argument(
+        "--resume-script",
+        type=Path,
+        help="Resume one specific saved script (used by admin job retries)",
+    )
+    parser.add_argument(
         "--title",
         default="",
         help="Optional post title used to create the video thumbnail",
     )
     args = parser.parse_args()
-    if args.resume and (args.topic is not None or args.minutes is not None):
-        parser.error("--resume cannot be combined with topic or minutes")
+    if (args.resume or args.resume_script) and (
+        args.topic is not None or args.minutes is not None
+    ):
+        parser.error("resume options cannot be combined with topic or minutes")
+    if args.resume and args.resume_script:
+        parser.error("--resume and --resume-script cannot be combined")
     if args.minutes is not None and args.minutes <= 0:
         parser.error("minutes must be greater than zero")
     return args
@@ -161,12 +170,25 @@ def find_latest_script() -> Path:
     return max(candidates, key=lambda path: path.stat().st_mtime_ns).resolve()
 
 
+def resolve_resume_script(configured_path: Path) -> Path:
+    script_path = configured_path.resolve()
+    scripts_root = SCRIPTS_DIR.resolve()
+    if scripts_root not in script_path.parents or script_path.suffix.lower() != ".txt":
+        raise SystemExit("--resume-script must point to a .txt file inside scripts/.")
+    if not script_path.is_file():
+        raise SystemExit(f"Saved script not found: {script_path}")
+    return script_path
+
+
 def main() -> None:
     args = parse_args()
     validate_environment()
 
     python = sys.executable
-    if args.resume:
+    if args.resume_script:
+        script_path = resolve_resume_script(args.resume_script)
+        print(f"Resuming job script: {script_path.name}")
+    elif args.resume:
         script_path = find_latest_script()
         print(f"Resuming newest script: {script_path.name}")
     else:

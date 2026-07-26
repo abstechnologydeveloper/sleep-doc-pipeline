@@ -26,6 +26,9 @@ Job status, overview counts, and newly completed media update through an authent
 WebSocket connection. Publishing uses a server-validated media ID rather than accepting
 an arbitrary file path from the browser.
 
+Automatic jobs retain their exact saved script path. Retrying a failed job resumes that
+script and reuses completed narration chunks and generated assets instead of starting over.
+
 Copy `.env.example` to `.env`, set the API keys and a strong session secret,
 then start the dashboard:
 

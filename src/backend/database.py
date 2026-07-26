@@ -43,6 +43,7 @@ def initialize() -> None:
                 scheduled_at TEXT,
                 source_path TEXT,
                 video_path TEXT,
+                script_path TEXT,
                 log_path TEXT,
                 error TEXT,
                 created_at TEXT NOT NULL,
@@ -63,6 +64,12 @@ def initialize() -> None:
             );
             """
         )
+        columns = {
+            str(row["name"])
+            for row in db.execute("PRAGMA table_info(jobs)").fetchall()
+        }
+        if "script_path" not in columns:
+            db.execute("ALTER TABLE jobs ADD COLUMN script_path TEXT")
 
 
 def create_job(**values) -> int:
@@ -187,7 +194,7 @@ def claim_job():
 def update_job(job_id: int, status: str, **fields) -> None:
     allowed = {
         "topic", "title", "description", "hashtags",
-        "video_path", "log_path", "error",
+        "video_path", "script_path", "log_path", "error",
     }
     updates = {key: value for key, value in fields.items() if key in allowed}
     updates.update(status=status, updated_at=utc_now())
