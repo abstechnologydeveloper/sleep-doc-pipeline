@@ -97,6 +97,77 @@ def split_scene_text(text: str, words_per_scene: int = WORDS_PER_SCENE) -> list[
     ]
 
 
+def load_story_scenes(image_dir: Path, text: str) -> list[dict]:
+    """Load dynamic story beats, falling back to legacy fixed-size projects."""
+    plan_path = image_dir / "scene_plan.json"
+    if plan_path.is_file():
+        payload = {}
+        try:
+            payload = json.loads(plan_path.read_text(encoding="utf-8"))
+            scenes = payload.get("scenes")
+            if payload.get("version") == 2 and isinstance(scenes, list) and scenes:
+                expected_start = 0
+                normalized = []
+                for index, scene in enumerate(scenes, start=1):
+                    start_word = int(scene["start_word"])
+                    end_word = int(scene["end_word"])
+                    if (
+                        scene.get("id") != f"scene_{index:03d}"
+                        or start_word != expected_start
+                        or end_word <= start_word
+                    ):
+                        raise ValueError("invalid dynamic scene coverage")
+                    normalized.append(scene)
+                    expected_start = end_word
+                if expected_start != len(text.split()):
+                    raise ValueError("dynamic scenes do not cover the full script")
+                return normalized
+        except (KeyError, TypeError, ValueError, OSError, json.JSONDecodeError):
+            if payload.get("version") == 2:
+                raise SystemExit(
+                    f"Dynamic scene plan is invalid: {plan_path}. "
+                    "Regenerate the scene plan before assembling the video."
+                )
+            print("Warning: invalid dynamic scene plan; using legacy scene timing.")
+
+    scene_texts = split_scene_text(text)
+    scenes = []
+    word_cursor = 0
+    for index, narration in enumerate(scene_texts, start=1):
+        word_count = len(narration.split())
+        scenes.append(
+            {
+                "id": f"scene_{index:03d}",
+                "start_word": word_cursor,
+                "end_word": word_cursor + word_count,
+                "word_count": word_count,
+                "narration": narration,
+                "reuse_scene_id": None,
+            }
+        )
+        word_cursor += word_count
+    return scenes
+
+
+def resolve_scene_images(image_dir: Path, scenes: list[dict]) -> list[Path]:
+    """Resolve one visual per story beat, including deliberate visual reuse."""
+    image_paths = []
+    for scene in scenes:
+        image_id = scene.get("reuse_scene_id") or scene["id"]
+        image_path = next(
+            (
+                image_dir / f"{image_id}{suffix}"
+                for suffix in (".jpg", ".jpeg", ".png")
+                if (image_dir / f"{image_id}{suffix}").is_file()
+            ),
+            None,
+        )
+        if image_path is None:
+            raise SystemExit(f"Image for {scene['id']} was not found in {image_dir}")
+        image_paths.append(image_path)
+    return image_paths
+
+
 def load_scene_directions(image_dir: Path, scene_count: int) -> list[dict]:
     """Load art-directed camera, transition, and atmosphere choices when available."""
     default = [
@@ -108,6 +179,15 @@ def load_scene_directions(image_dir: Path, scene_count: int) -> list[dict]:
         return default
     try:
         payload = json.loads(plan_path.read_text(encoding="utf-8"))
+        if payload.get("version") == 2:
+            scenes = payload.get("scenes")
+            if isinstance(scenes, list) and len(scenes) == scene_count:
+                return [
+                    scene.get("direction", default[index])
+                    if isinstance(scene, dict)
+                    else default[index]
+                    for index, scene in enumerate(scenes)
+                ]
         directions = payload.get("scene_directions")
         if not isinstance(directions, list) or len(directions) != scene_count:
             return default
@@ -129,7 +209,9 @@ def load_thumbnail_hook(image_dir: Path) -> str:
         return ""
 
 
-def load_sound_cues(script_stem: str, scene_durations: list[float]) -> list[dict]:
+def load_sound_cues(
+    script_stem: str, scenes: list[dict], scene_durations: list[float]
+) -> list[dict]:
     """Load generated effects and convert scene-relative positions to timestamps."""
     sound_dir = SOUNDS_DIR / script_stem
     manifest_path = sound_dir / "sound_manifest.json"
@@ -148,9 +230,13 @@ def load_sound_cues(script_stem: str, scene_durations: list[float]) -> list[dict
         elapsed += duration
 
     cues = []
+    scene_indexes = {scene["id"]: index for index, scene in enumerate(scenes)}
     for cue in payload.get("cues", []):
         try:
-            scene_index = int(cue["scene_index"]) - 1
+            if cue.get("scene_id"):
+                scene_index = scene_indexes[str(cue["scene_id"])]
+            else:
+                scene_index = int(cue["scene_index"]) - 1
             position = min(1.0, max(0.0, float(cue.get("position", 0.5))))
             volume = min(0.16, max(0.04, float(cue.get("volume", 0.10))))
             duration = min(4.0, max(0.5, float(cue.get("duration_seconds", 2.0))))
@@ -168,6 +254,43 @@ def load_sound_cues(script_stem: str, scene_durations: list[float]) -> list[dict
             }
         )
     return cues
+
+
+def timed_scene_durations(
+    scenes: list[dict], text: str, duration: float, timing_path: Path
+) -> list[float]:
+    """Map exact story word ranges onto measured TTS chunk boundaries."""
+    word_times: list[tuple[float, float]] = []
+    if timing_path.is_file():
+        try:
+            payload = json.loads(timing_path.read_text(encoding="utf-8"))
+            measured_duration = float(payload["audio_duration"])
+            if abs(measured_duration - duration) > max(0.25, duration * 0.01):
+                raise ValueError("timing data does not match narration")
+            for segment in payload["segments"]:
+                count = len(str(segment["text"]).split())
+                start = float(segment["start"])
+                end = float(segment["end"])
+                if count < 1 or end <= start:
+                    continue
+                per_word = (end - start) / count
+                word_times.extend(
+                    (start + offset * per_word, start + (offset + 1) * per_word)
+                    for offset in range(count)
+                )
+        except (KeyError, TypeError, ValueError, OSError, json.JSONDecodeError):
+            word_times = []
+
+    if len(word_times) == len(text.split()):
+        return [
+            word_times[int(scene["end_word"]) - 1][1]
+            - word_times[int(scene["start_word"])][0]
+            for scene in scenes
+        ]
+
+    print("Warning: scene timing is estimated because measured word alignment is unavailable.")
+    total_words = sum(int(scene["word_count"]) for scene in scenes)
+    return [int(scene["word_count"]) / total_words * duration for scene in scenes]
 
 
 def audio_duration(audio_path: Path) -> float:
@@ -717,13 +840,6 @@ def main() -> None:
             "Run generate_images.py for this script first."
         )
 
-    image_paths = sorted(
-        path
-        for path in image_dir.glob("scene_*.*")
-        if path.suffix.lower() in {".jpg", ".jpeg", ".png"}
-    )
-    if not image_paths:
-        raise SystemExit(f"No images found in {image_dir}")
     thumbnail_source = next(
         (
             image_dir / f"thumbnail_source{suffix}"
@@ -734,29 +850,21 @@ def main() -> None:
     )
 
     text = script_path.read_text(encoding="utf-8")
-    scene_word_counts = count_scene_words(text)
-    scene_texts = split_scene_text(text)
-    scene_directions = load_scene_directions(image_dir, len(scene_word_counts))
+    scenes = load_story_scenes(image_dir, text)
+    image_paths = resolve_scene_images(image_dir, scenes)
+    scene_texts = [str(scene.get("narration", "")) for scene in scenes]
+    scene_directions = load_scene_directions(image_dir, len(scenes))
     curiosity_hook = load_thumbnail_hook(image_dir)
-
-    if len(scene_word_counts) != len(image_paths):
-        print(
-            f"Warning: script has {len(scene_word_counts)} scenes but "
-            f"{len(image_paths)} images were found. Spreading time evenly "
-            "across images as a fallback."
-        )
-        scene_word_counts = [1] * len(image_paths)
-        scene_texts = [""] * len(image_paths)
-        scene_directions = load_scene_directions(image_dir, len(image_paths))
 
     print(f"Loading audio: {audio_path.name}")
     total_duration = audio_duration(audio_path)
-    total_words = sum(scene_word_counts)
-    scene_durations = [
-        (word_count / total_words) * total_duration
-        for word_count in scene_word_counts
-    ]
-    sound_cues = load_sound_cues(script_path.stem, scene_durations)
+    scene_durations = timed_scene_durations(
+        scenes,
+        text,
+        total_duration,
+        audio_path.with_suffix(".timings.json"),
+    )
+    sound_cues = load_sound_cues(script_path.stem, scenes, scene_durations)
 
     print(f"Audio duration: {total_duration / 60:.1f} minutes")
     print(f"Building {len(image_paths)} timed image clips...")

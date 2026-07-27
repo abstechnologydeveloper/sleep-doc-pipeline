@@ -14,6 +14,8 @@ import base64
 import binascii
 import json
 import os
+import re
+import hashlib
 import time
 from pathlib import Path
 from urllib import error, request
@@ -29,6 +31,7 @@ from project_paths import IMAGES_DIR, PROJECT_ROOT, SCRIPTS_DIR
 CLOUDFLARE_MODEL = "@cf/leonardo/lucid-origin"
 FAST_IMAGE_MODEL = "@cf/black-forest-labs/flux-1-schnell"
 WORDS_PER_SCENE = 50  # roughly six images per two minutes at 150 words/minute
+DEFAULT_MAX_STORY_IMAGES = 120
 MAX_RETRIES = 5
 RETRY_BASE_DELAY = 10  # seconds, doubles each retry
 
@@ -44,6 +47,108 @@ SAFETY_FALLBACK_PROMPT = (
 )
 SCENE_PLAN_FILENAME = "scene_plan.json"
 THUMBNAIL_STEM = "thumbnail_source"
+PLAN_VERSION = 2
+
+
+class ImageBudgetExceeded(RuntimeError):
+    """Raised before paid generation when required story visuals exceed the cap."""
+
+
+def split_narrative_segments(text: str) -> list[dict]:
+    """Create stable sentence anchors and exact word ranges for story planning."""
+    sentences = [
+        sentence.strip()
+        for sentence in re.split(r"(?<=[.!?])(?:[\"'”’]*)\s+", text.strip())
+        if sentence.strip()
+    ]
+    if not sentences and text.strip():
+        sentences = [text.strip()]
+
+    segments = []
+    word_cursor = 0
+    for index, sentence in enumerate(sentences, start=1):
+        word_count = len(sentence.split())
+        segments.append(
+            {
+                "id": index,
+                "text": sentence,
+                "start_word": word_cursor,
+                "end_word": word_cursor + word_count,
+            }
+        )
+        word_cursor += word_count
+    return segments
+
+
+def materialize_scenes(raw_scenes: object, segments: list[dict]) -> list[dict]:
+    """Validate complete segment coverage and add deterministic scene metadata."""
+    if not isinstance(raw_scenes, list) or not raw_scenes or not segments:
+        raise ValueError("The visual plan contains no story scenes")
+
+    scenes = []
+    expected_start = 1
+    for index, raw in enumerate(raw_scenes, start=1):
+        if not isinstance(raw, dict):
+            raise ValueError("Every story scene must be an object")
+        try:
+            start_segment = int(raw["start_segment"])
+            end_segment = int(raw["end_segment"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError("Every scene needs valid segment boundaries") from exc
+        if start_segment != expected_start or end_segment < start_segment:
+            raise ValueError("Story scenes must cover narration in order without gaps")
+        if end_segment > len(segments):
+            raise ValueError("A story scene ends beyond the narration")
+
+        covered = segments[start_segment - 1:end_segment]
+        prompt = str(raw.get("prompt", "")).strip()
+        if not prompt:
+            raise ValueError("Every story scene needs an image prompt")
+        direction = raw.get("direction")
+        if not isinstance(direction, dict):
+            direction = {}
+        reuse_scene_id = raw.get("reuse_scene_id")
+        if reuse_scene_id is not None:
+            reuse_scene_id = str(reuse_scene_id).strip() or None
+            if reuse_scene_id:
+                match = re.fullmatch(r"(?:scene[_ -]?)?(\d+)", reuse_scene_id, re.I)
+                if match:
+                    reuse_scene_id = f"scene_{int(match.group(1)):03d}"
+
+        scenes.append(
+            {
+                "id": f"scene_{index:03d}",
+                "start_segment": start_segment,
+                "end_segment": end_segment,
+                "start_word": covered[0]["start_word"],
+                "end_word": covered[-1]["end_word"],
+                "word_count": covered[-1]["end_word"] - covered[0]["start_word"],
+                "narration": " ".join(item["text"] for item in covered),
+                "beat": str(raw.get("beat", "")).strip(),
+                "action": str(raw.get("action", "")).strip(),
+                "characters": raw.get("characters", []),
+                "location": str(raw.get("location", "")).strip(),
+                "importance": str(raw.get("importance", "mandatory")).strip(),
+                "reuse_scene_id": reuse_scene_id,
+                "prompt": f"{prompt[:1750]}{STYLE_SUFFIX}",
+                "direction": {
+                    "camera": direction.get("camera", "slow_push"),
+                    "transition": direction.get("transition", "fade"),
+                    "atmosphere": direction.get("atmosphere", "none"),
+                },
+            }
+        )
+        expected_start = end_segment + 1
+
+    if expected_start != len(segments) + 1:
+        raise ValueError("The final story scene does not reach the end of the narration")
+
+    known_ids = {scene["id"] for scene in scenes}
+    for scene in scenes:
+        reused = scene["reuse_scene_id"]
+        if reused and (reused not in known_ids or reused >= scene["id"]):
+            raise ValueError("A reused visual must reference an earlier scene")
+    return scenes
 
 
 def split_into_scenes(text: str, words_per_scene: int = WORDS_PER_SCENE) -> list[str]:
@@ -102,6 +207,180 @@ def valid_visual_plan(plan: object, scene_count: int) -> bool:
         and isinstance(plan.get("thumbnail_prompt"), str)
         and bool(plan["thumbnail_prompt"].strip())
     )
+
+
+def valid_dynamic_plan(plan: object, text: str) -> bool:
+    if not isinstance(plan, dict) or plan.get("version") != PLAN_VERSION:
+        return False
+    if plan.get("script_hash") != hashlib.sha256(text.encode("utf-8")).hexdigest():
+        return False
+    scenes = plan.get("scenes")
+    if not isinstance(scenes, list) or not scenes:
+        return False
+    expected_word = 0
+    for index, scene in enumerate(scenes, start=1):
+        if not isinstance(scene, dict) or scene.get("id") != f"scene_{index:03d}":
+            return False
+        if scene.get("start_word") != expected_word:
+            return False
+        end_word = scene.get("end_word")
+        if not isinstance(end_word, int) or end_word <= expected_word:
+            return False
+        if not str(scene.get("prompt", "")).strip():
+            return False
+        expected_word = end_word
+    return (
+        expected_word == len(text.split())
+        and isinstance(plan.get("sound_cues"), list)
+        and bool(str(plan.get("thumbnail_hook", "")).strip())
+        and bool(str(plan.get("thumbnail_prompt", "")).strip())
+    )
+
+
+def create_dynamic_visual_plan(
+    text: str,
+    title: str,
+    api_key: str,
+    plan_path: Path,
+    max_images: int,
+) -> dict:
+    """Plan visuals around narrative events rather than a words-per-image ratio."""
+    if plan_path.is_file():
+        try:
+            saved_plan = json.loads(plan_path.read_text(encoding="utf-8"))
+            if valid_dynamic_plan(saved_plan, text):
+                print("Using saved dynamic story scene plan.")
+                return saved_plan
+            # Preserve resumability for projects created by the original fixed-ratio planner.
+            legacy_scenes = split_into_scenes(text)
+            if valid_visual_plan(saved_plan, len(legacy_scenes)):
+                print("Using saved legacy scene plan.")
+                return saved_plan
+        except (OSError, json.JSONDecodeError):
+            pass
+
+    segments = split_narrative_segments(text)
+    segment_list = "\n".join(
+        f"{item['id']}. {item['text']}" for item in segments
+    )
+    prompt = f"""Act as the storyboard director for an original narrated YouTube story.
+Divide the narration into visual scenes based only on meaningful story events, not a fixed
+word count or images-per-minute ratio. Start a new visual when the action, location, time,
+important character, emotion, clue, discovery, decision, or story direction changes. Keep a
+continuous calm passage together when the same visual can honestly represent it. Every
+numbered narration segment must belong to exactly one scene, in order, without gaps or
+overlaps. Never split a numbered segment.
+
+The hard paid-image limit is {max_images}. Do not skip an important storyline to fit the
+limit. If the story genuinely needs more than {max_images} distinct visuals, set
+budget_sufficient to false and required_scene_count to your honest estimate. Otherwise use
+the fewest scenes that fully and clearly represent every meaningful narrative beat. A scene
+may reuse an earlier image only when the location, characters, clothing, visible action, and
+emotional purpose remain substantially the same; set reuse_scene_id to that earlier ID.
+
+Infer the audience and choose a fitting coherent visual medium: realistic cinema for adult
+realistic stories, age-appropriate 2D or 3D animation for children, historical realism,
+fantasy illustration, gentle gothic suspense, nature documentary, or another suitable style.
+Never imitate a named artist, studio, franchise, or copyrighted character.
+
+Create continuity registries for every recurring character, location, and important prop.
+Lock faces, age, body shape, hair, clothing, colors, architecture, geography, weather,
+lighting direction, and palette. Each prompt must repeat the relevant locked details and
+describe visible action, expression, setting, camera distance, composition, and lighting.
+Generate native cinematic 16:9 compositions with important subjects in a central safe area,
+no words, letters, logos, watermark, collage, frame, gore, or nudity.
+
+Choose restrained camera movement and transitions. Select sparse sound cues only for visible
+or strongly implied events; use stable scene_id values. Create a separate colorful YouTube
+thumbnail with one readable subject, an honest curiosity gap, strong contrast, focal subject
+on the right, and clean darker space on the left for text.
+
+Title: {title or '(derive from the narration)'}
+Numbered narration segments:
+{segment_list}
+
+Return JSON only with:
+- budget_sufficient: boolean
+- required_scene_count: integer
+- project_profile: audience, genre, visual_medium, tone, palette, lighting
+- continuity: characters, locations, props arrays of detailed objects with stable IDs
+- visual_bible: concise string
+- scenes: ordered objects with start_segment, end_segment, beat, action, characters (IDs),
+  location (ID or empty), importance (mandatory or continuity), reuse_scene_id (earlier
+  scene_### or null), prompt, and direction containing camera (slow_push, slow_pull,
+  pan_left, pan_right), transition (fade, dissolve, smooth_left, smooth_right), and
+  atmosphere (none, stars, rain, snow, embers, fog, motes)
+- sound_cues: sparse objects with scene_id, position (0 to 1), prompt, duration_seconds
+  (0.5 to 4), volume (0.04 to 0.16), and kind
+- thumbnail_hook: 2 to 5 simple curiosity words
+- thumbnail_prompt: detailed native 16:9 prompt
+"""
+
+    try:
+        client = genai.Client(api_key=api_key)
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json",
+                temperature=0.45,
+            ),
+        )
+        raw_plan = json.loads(response.text or "")
+        required = int(raw_plan.get("required_scene_count", 0))
+        if raw_plan.get("budget_sufficient") is False or required > max_images:
+            raise ImageBudgetExceeded(
+                f"This story needs approximately {required or 'more'} distinct images, "
+                f"which exceeds MAX_STORY_IMAGES={max_images}. Increase the limit "
+                "before making paid image requests."
+            )
+        scenes = materialize_scenes(raw_plan.get("scenes"), segments)
+        distinct_scene_count = sum(
+            not scene.get("reuse_scene_id") for scene in scenes
+        )
+        if distinct_scene_count > max_images:
+            raise ImageBudgetExceeded(
+                f"The dynamic storyboard needs {distinct_scene_count} distinct images, exceeding "
+                f"MAX_STORY_IMAGES={max_images}."
+            )
+        hook = " ".join(
+            str(raw_plan.get("thumbnail_hook", "")).strip().strip('"\'').split()[:5]
+        ).upper()
+        plan = {
+            "version": PLAN_VERSION,
+            "script_hash": hashlib.sha256(text.encode("utf-8")).hexdigest(),
+            "project_profile": raw_plan.get("project_profile", {}),
+            "continuity": raw_plan.get("continuity", {}),
+            "visual_bible": str(raw_plan.get("visual_bible", "")).strip(),
+            "scenes": scenes,
+            "sound_cues": raw_plan.get("sound_cues", []),
+            "thumbnail_hook": hook or "WHAT HAPPENS NEXT?",
+            "thumbnail_prompt": (
+                f"{str(raw_plan.get('thumbnail_prompt', '')).strip()[:1750]}{STYLE_SUFFIX}"
+            ),
+            "planning_fallback": False,
+        }
+        if not valid_dynamic_plan(plan, text):
+            raise ValueError("Gemini returned an incomplete dynamic storyboard")
+        plan_path.write_text(json.dumps(plan, indent=2), encoding="utf-8")
+        print(f"Saved dynamic story scene plan with {len(scenes)} scenes.")
+        return plan
+    except ImageBudgetExceeded:
+        raise
+    except (
+        OSError,
+        ValueError,
+        TypeError,
+        json.JSONDecodeError,
+        ConnectionError,
+        TimeoutError,
+        genai_errors.ClientError,
+        genai_errors.ServerError,
+    ) as exc:
+        raise RuntimeError(
+            "Dynamic story planning failed before image generation. "
+            "Retry the image stage; no fixed-ratio fallback or paid image request was used."
+        ) from exc
 
 
 def create_visual_plan(
@@ -383,25 +662,68 @@ def main() -> None:
     print(f"Image model: {image_model}")
 
     text = script_path.read_text(encoding="utf-8")
-    scenes = split_into_scenes(text)
-    print(f"Script split into {len(scenes)} scenes for image generation.")
+    if not text.strip():
+        raise SystemExit("The selected script is empty.")
+    try:
+        max_story_images = int(
+            os.getenv("MAX_STORY_IMAGES", str(DEFAULT_MAX_STORY_IMAGES))
+        )
+    except ValueError as exc:
+        raise SystemExit("MAX_STORY_IMAGES must be a positive integer.") from exc
+    if max_story_images < 1:
+        raise SystemExit("MAX_STORY_IMAGES must be a positive integer.")
 
     image_dir = IMAGES_DIR / script_path.stem
     image_dir.mkdir(parents=True, exist_ok=True)
     gemini_api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
-    visual_plan = (
-        create_visual_plan(
-            scenes,
-            args.title,
-            gemini_api_key,
-            image_dir / SCENE_PLAN_FILENAME,
+    plan_path = image_dir / SCENE_PLAN_FILENAME
+    if not gemini_api_key:
+        raise SystemExit(
+            "GEMINI_API_KEY is required for dynamic story-based image planning."
         )
-        if gemini_api_key
-        else fallback_visual_plan(scenes)
+    visual_plan = create_dynamic_visual_plan(
+        text,
+        args.title,
+        gemini_api_key,
+        plan_path,
+        max_story_images,
     )
 
-    for i, _scene_text in enumerate(scenes, start=1):
-        image_stem = f"scene_{i:03d}"
+    if visual_plan.get("version") == PLAN_VERSION:
+        scene_entries = visual_plan["scenes"]
+    else:
+        legacy_scenes = split_into_scenes(text)
+        scene_entries = [
+            {
+                "id": f"scene_{index:03d}",
+                "prompt": visual_plan["scene_prompts"][index - 1],
+                "reuse_scene_id": None,
+            }
+            for index in range(1, len(legacy_scenes) + 1)
+        ]
+    distinct_count = sum(not scene.get("reuse_scene_id") for scene in scene_entries)
+    print(
+        f"Dynamic storyboard: {len(scene_entries)} story beats, "
+        f"{distinct_count} distinct images."
+    )
+
+    for i, scene in enumerate(scene_entries, start=1):
+        image_stem = scene["id"]
+        reused_scene_id = scene.get("reuse_scene_id")
+        if reused_scene_id:
+            source_exists = any(
+                (image_dir / f"{reused_scene_id}{suffix}").is_file()
+                for suffix in (".jpg", ".jpeg", ".png")
+            )
+            if not source_exists:
+                raise RuntimeError(
+                    f"{image_stem} reuses {reused_scene_id}, but its image is missing."
+                )
+            print(
+                f"  Scene {i}/{len(scene_entries)} reuses {reused_scene_id}; "
+                "no paid image request needed."
+            )
+            continue
         existing_image = next(
             (
                 image_dir / f"{image_stem}{suffix}"
@@ -411,15 +733,17 @@ def main() -> None:
             None,
         )
         if existing_image:
-            print(f"  Scene {i}/{len(scenes)} already done, skipping.")
+            print(f"  Scene {i}/{len(scene_entries)} already done, skipping.")
             continue
 
-        prompt = visual_plan["scene_prompts"][i - 1]
-        print(f"  Generating scene {i}/{len(scenes)}: {prompt[:70]}...")
+        prompt = scene["prompt"]
+        print(f"  Generating scene {i}/{len(scene_entries)}: {prompt[:70]}...")
 
         image_data, suffix = generate_image(account_id, api_token, prompt, image_model)
         image_path = image_dir / f"{image_stem}{suffix}"
-        image_path.write_bytes(image_data)
+        temporary_path = image_dir / f"{image_stem}.generating{suffix}"
+        temporary_path.write_bytes(image_data)
+        temporary_path.replace(image_path)
 
     existing_thumbnail = next(
         (
@@ -439,12 +763,14 @@ def main() -> None:
             visual_plan["thumbnail_prompt"],
             image_model,
         )
-        (image_dir / f"{THUMBNAIL_STEM}{thumbnail_suffix}").write_bytes(
-            thumbnail_data
-        )
+        thumbnail_path = image_dir / f"{THUMBNAIL_STEM}{thumbnail_suffix}"
+        temporary_path = image_dir / f"{THUMBNAIL_STEM}.generating{thumbnail_suffix}"
+        temporary_path.write_bytes(thumbnail_data)
+        temporary_path.replace(thumbnail_path)
 
     print(f"\nAll images saved to {image_dir}")
-    print(f"Total scenes: {len(scenes)}")
+    print(f"Total story beats: {len(scene_entries)}")
+    print(f"Distinct generated images: {distinct_count}")
 
 
 if __name__ == "__main__":

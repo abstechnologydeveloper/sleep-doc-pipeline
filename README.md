@@ -81,6 +81,7 @@ GEMINI_API_KEY=your_gemini_key
 CLOUDFLARE_ACCOUNT_ID=your_cloudflare_account_id
 CLOUDFLARE_API_TOKEN=your_workers_ai_api_token
 CLOUDFLARE_IMAGE_MODEL=@cf/leonardo/lucid-origin
+MAX_STORY_IMAGES=120
 ELEVENLABS_API_KEY=your_optional_elevenlabs_key
 ```
 
@@ -202,12 +203,28 @@ Or provide its path:
 $PYTHON generate_images.py scripts/<script-name>.txt
 ```
 
-The current pacing is one image per 50 words, approximately six images for a
-two-minute narration. Gemini first creates and saves a visual continuity plan,
-automatically choosing a fitting medium and editing direction for the story.
-Cloudflare then renders native 16:9 scenes plus one dedicated thumbnail composition.
-Existing scene files and the thumbnail source are skipped so interrupted runs
-can continue without paying for the same image twice.
+Gemini first divides the complete narration into meaningful story beats. A new
+visual is planned for changes in action, place, time, character, emotion, clues,
+decisions, discoveries, and other important story events. The image count is not
+calculated from video duration or a fixed words-per-image ratio. Calm continuous
+passages may deliberately reuse an earlier visual with different movement, while
+every meaningful storyline remains represented.
+
+The saved versioned scene plan includes exact narration word boundaries, a project
+style profile, recurring character/location/prop continuity, scene prompts, camera
+directions, transitions, sound cues, and a separate thumbnail concept. Cloudflare
+then renders the distinct scene images. Existing files are skipped, and deliberately
+reused scenes do not create another paid image request. Video timing and sound cues
+read the same scene plan, keeping each visual aligned with its actual narration.
+
+`MAX_STORY_IMAGES` is a hard spending guard, not a pacing target. The default is
+120. If the planner reports that an important storyline needs more distinct visuals,
+the image stage stops before paid generation and asks for a higher limit instead of
+silently omitting story events.
+
+Lucid Origin receives a native 1536×864 request. The assembler scales and crops to
+the final 1280×720 frame without letterboxing. A separate native-widescreen thumbnail
+composition is generated for every new project.
 
 Lucid Origin is the quality default and is paid per generated tile and step. To
 restore the lower-cost fixed-format model, set
@@ -223,6 +240,9 @@ images/<script-name>/scene_plan.json
 images/<script-name>/thumbnail_source.jpg
 ```
 
+Older saved projects keep their original fixed scene plan and remain resumable.
+New projects use dynamic scene-plan version 2.
+
 ### 4. Generate optional sound effects
 
 Add `ELEVENLABS_API_KEY` to `.env`, then run:
@@ -232,7 +252,8 @@ $PYTHON generate_sounds.py scripts/<script-name>.txt
 ```
 
 Gemini selects a small number of meaningful footsteps, doors, movement, weather,
-nature, magic, or transition moments in `scene_plan.json`. ElevenLabs generates short
+nature, magic, or transition moments in `scene_plan.json`. Cues use stable scene IDs,
+so their placement remains correct when visuals are reused. ElevenLabs generates short
 MP3 cues, and interrupted runs reuse completed files. Sound generation is usage-billed;
 the current API charges 40 credits per generated second when duration is specified. The
 pipeline allows no more than one cue per two scenes and caps every project at 30 cues.

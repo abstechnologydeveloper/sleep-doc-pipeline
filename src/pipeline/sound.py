@@ -39,7 +39,7 @@ def select_script(script_argument: str | None) -> Path:
         print(f"Enter a number from 1 to {len(scripts)}.")
 
 
-def normalized_cues(payload: object, scene_count: int) -> list[dict]:
+def normalized_cues(payload: object, scene_ids: list[str]) -> list[dict]:
     if not isinstance(payload, list):
         return []
     cues = []
@@ -47,17 +47,23 @@ def normalized_cues(payload: object, scene_count: int) -> list[dict]:
         if not isinstance(cue, dict):
             continue
         try:
-            scene_index = int(cue["scene_index"])
+            if cue.get("scene_id"):
+                scene_id = str(cue["scene_id"])
+                scene_index = scene_ids.index(scene_id) + 1
+            else:
+                scene_index = int(cue["scene_index"])
+                scene_id = scene_ids[scene_index - 1]
             prompt = str(cue["prompt"]).strip()
             position = min(1.0, max(0.0, float(cue.get("position", 0.5))))
             duration = min(4.0, max(0.5, float(cue.get("duration_seconds", 2.0))))
             volume = min(0.16, max(0.04, float(cue.get("volume", 0.10))))
-        except (KeyError, TypeError, ValueError):
+        except (KeyError, IndexError, TypeError, ValueError):
             continue
-        if not 1 <= scene_index <= scene_count or not prompt:
+        if not 1 <= scene_index <= len(scene_ids) or not prompt:
             continue
         cues.append(
             {
+                "scene_id": scene_id,
                 "scene_index": scene_index,
                 "position": position,
                 "prompt": prompt[:500],
@@ -66,7 +72,7 @@ def normalized_cues(payload: object, scene_count: int) -> list[dict]:
                 "kind": str(cue.get("kind", "action"))[:30],
             }
         )
-    maximum = min(MAX_SOUND_CUES, max(1, (scene_count + 1) // 2))
+    maximum = min(MAX_SOUND_CUES, max(1, (len(scene_ids) + 1) // 2))
     return cues[:maximum]
 
 
@@ -129,8 +135,14 @@ def main() -> None:
     except (OSError, json.JSONDecodeError) as exc:
         raise SystemExit(f"Could not read scene plan: {exc}") from exc
 
-    scene_count = len(plan.get("scene_prompts", []))
-    cues = normalized_cues(plan.get("sound_cues"), scene_count)
+    if plan.get("version") == 2 and isinstance(plan.get("scenes"), list):
+        scene_ids = [str(scene.get("id", "")) for scene in plan["scenes"]]
+    else:
+        scene_ids = [
+            f"scene_{index:03d}"
+            for index in range(1, len(plan.get("scene_prompts", [])) + 1)
+        ]
+    cues = normalized_cues(plan.get("sound_cues"), scene_ids)
     if not cues:
         print("Sound design skipped: no useful sound moments were selected.")
         return
