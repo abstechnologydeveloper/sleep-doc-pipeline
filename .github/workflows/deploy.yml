@@ -31,6 +31,30 @@ jobs:
       - uses: actions/checkout@v4
         with:
           clean: true
+      - name: Validate production environment secret
+        shell: bash
+        run: |
+          if [[ -z "${STUDIO_ENV_FILE:-}" ]]; then
+            echo "STUDIO_ENV_FILE is unavailable. Add it under repository secrets or the production environment secrets, not Variables." >&2
+            exit 1
+          fi
+          required_keys=(
+            GEMINI_API_KEY CLOUDFLARE_ACCOUNT_ID CLOUDFLARE_API_TOKEN
+            ADMIN_SESSION_SECRET PUBLIC_BASE_URL POSTGRES_PASSWORD DATABASE_URL
+            ADMIN_EMAIL AUTH_IP_HASH_SALT OAUTH_TOKEN_ENCRYPTION_KEY
+            R2_ACCOUNT_ID R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY R2_BUCKET
+            GOOGLE_OAUTH_CLIENT_ID GOOGLE_OAUTH_CLIENT_SECRET
+          )
+          for key in "${required_keys[@]}"; do
+            if ! grep -Eq "^${key}=.+$" <<< "${STUDIO_ENV_FILE}"; then
+              echo "STUDIO_ENV_FILE is missing a non-empty ${key} entry." >&2
+              exit 1
+            fi
+          done
+          if grep -Eq '^\+[^=]+=' <<< "${STUDIO_ENV_FILE}"; then
+            echo "STUDIO_ENV_FILE contains a key beginning with '+'. Remove the leading '+'." >&2
+            exit 1
+          fi
       - name: Deploy and clean old Docker artifacts
         run: ./deploy.sh
       - name: Show service status
