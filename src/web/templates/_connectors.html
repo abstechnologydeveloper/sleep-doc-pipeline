@@ -3,9 +3,7 @@
   <div class="connector-row">
     <span class="platform-mark">{{ connector.name[0]|upper }}</span>
     <span><strong>{{ connector.name|title }}</strong><small>{{ connector.requirement }}</small></span>
-    <span class="status {{ 'status-completed' if connector.configured else 'status-waiting_for_connections' }}">
-      {{ 'Connected' if connector.configured else 'Not connected' }}
-    </span>
+    <span>{% if connector.configured %}<span class="status status-completed">Connected{% if connector.account_name %}: {{ connector.account_name }}{% endif %}</span>{% if connector.name == 'youtube' %}<form method="post" action="/connections/youtube/disconnect"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="text-button" type="submit">Disconnect</button></form>{% endif %}{% elif connector.connect_url %}<a class="button secondary" href="{{ connector.connect_url }}">Connect {{ connector.name|title }}</a>{% else %}<span class="status status-waiting_for_connections">Not connected</span>{% endif %}</span>
   </div>
 {% endfor %}
 </div>

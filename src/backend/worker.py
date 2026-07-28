@@ -1,16 +1,27 @@
 import json
 import os
 import signal
+import shutil
 import subprocess
 import sys
 import threading
 import time
 from pathlib import Path
+from contextlib import ExitStack
 
-from project_paths import DATA_DIR, PROJECT_ROOT, SCRIPTS_DIR, VIDEOS_DIR
+from project_paths import (
+    AUDIO_DIR,
+    DATA_DIR,
+    IMAGES_DIR,
+    PROJECT_ROOT,
+    SCRIPTS_DIR,
+    SOUNDS_DIR,
+    THUMBNAILS_DIR,
+    VIDEOS_DIR,
+)
 from pipeline.script import safe_topic_slug
 
-from . import database
+from . import database, storage
 from .content import generate_post_metadata
 from .publishers import publish
 
@@ -98,58 +109,141 @@ def run_automatic(job, log_file) -> Path:
     return newest_video(existing_videos)
 
 
+def cleanup_generated_media(video_path: Path) -> None:
+    """Remove successful pipeline working media after durable R2 storage."""
+    stem = video_path.stem
+    video_path.unlink(missing_ok=True)
+    (THUMBNAILS_DIR / f"{stem}.jpg").unlink(missing_ok=True)
+    (AUDIO_DIR / f"{stem}.wav").unlink(missing_ok=True)
+    shutil.rmtree(IMAGES_DIR / stem, ignore_errors=True)
+    shutil.rmtree(SOUNDS_DIR / stem, ignore_errors=True)
+
+
+def migrate_one_local_media() -> bool:
+    """Move one legacy finished video to R2 while the worker is otherwise idle."""
+    candidates = database.list_local_media_jobs()
+    job = next((item for item in candidates if Path(item["video_path"]).is_file()), None)
+    if job is None:
+        return False
+    local_video = Path(job["video_path"])
+    owner_id = int(job.get("owner_id") or 0)
+    remote_video = storage.upload_file(
+        local_video,
+        storage.job_video_key(owner_id, int(job["id"]), local_video.suffix or ".mp4"),
+        "video/mp4",
+    )
+    local_thumbnail = THUMBNAILS_DIR / f"{local_video.stem}.jpg"
+    if local_thumbnail.is_file():
+        storage.upload_file(
+            local_thumbnail,
+            storage.job_thumbnail_key(owner_id, int(job["id"])),
+            "image/jpeg",
+        )
+    database.update_job(int(job["id"]), str(job["status"]), video_path=remote_video)
+    if job["kind"] == "automatic":
+        cleanup_generated_media(local_video)
+    else:
+        local_video.unlink(missing_ok=True)
+        local_thumbnail.unlink(missing_ok=True)
+    return True
+
+
 def process_job(job) -> None:
     job = dict(job)
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     log_path = LOG_DIR / f"job_{job['id']}.log"
     database.update_job(job["id"], "processing", log_path=str(log_path))
+    generated_video: Path | None = None
     try:
-        with log_path.open("a", encoding="utf-8") as log_file:
-            if job["kind"] == "automatic":
-                print("Preparing topic and post metadata...", file=log_file, flush=True)
-                metadata = generate_post_metadata(
-                    topic=job["topic"] or "",
-                    title=job["title"] or "",
-                    description=job["description"] or "",
-                    hashtags=job["hashtags"] or "",
-                )
+        with ExitStack() as stack:
+            with log_path.open("a", encoding="utf-8") as log_file:
+                if job["kind"] == "automatic":
+                    print("Preparing topic and post metadata...", file=log_file, flush=True)
+                    metadata = generate_post_metadata(
+                        topic=job["topic"] or "",
+                        title=job["title"] or "",
+                        description=job["description"] or "",
+                        hashtags=job["hashtags"] or "",
+                    )
+                    if database.cancellation_requested(job["id"]):
+                        raise JobCancelled
+                    job.update(metadata)
+                    database.update_job(job["id"], "processing", **metadata)
+                    if storage.is_remote(job.get("video_path")):
+                        print("Reusing finished video from R2...", file=log_file, flush=True)
+                        video_path = stack.enter_context(
+                            storage.local_copy(str(job["video_path"]), ".mp4")
+                        )
+                    else:
+                        print(f"Topic: {job['topic']}", file=log_file, flush=True)
+                        video_path = run_automatic(job, log_file)
+                        generated_video = video_path
+                else:
+                    source_reference = str(job["source_path"])
+                    video_path = stack.enter_context(
+                        storage.local_copy(source_reference, Path(source_reference).suffix or ".mp4")
+                    )
                 if database.cancellation_requested(job["id"]):
                     raise JobCancelled
-                job.update(metadata)
-                database.update_job(job["id"], "processing", **metadata)
-                print(f"Topic: {job['topic']}", file=log_file, flush=True)
-                video_path = run_automatic(job, log_file)
+                if not video_path.is_file():
+                    raise RuntimeError(f"Video file does not exist: {video_path}")
+
+            owner_id = int(job.get("owner_id") or 0)
+            if job["kind"] == "manual" and storage.is_remote(job.get("source_path")):
+                remote_video = str(job["source_path"])
+            elif storage.is_remote(job.get("video_path")):
+                remote_video = str(job["video_path"])
             else:
-                video_path = Path(job["source_path"])
-            if database.cancellation_requested(job["id"]):
-                raise JobCancelled
-            if not video_path.is_file():
-                raise RuntimeError(f"Video file does not exist: {video_path}")
+                remote_video = storage.upload_file(
+                    video_path,
+                    storage.job_video_key(owner_id, int(job["id"]), video_path.suffix or ".mp4"),
+                    "video/mp4",
+                )
+                local_thumbnail = THUMBNAILS_DIR / f"{video_path.stem}.jpg"
+                if local_thumbnail.is_file():
+                    storage.upload_file(
+                        local_thumbnail,
+                        storage.job_thumbnail_key(owner_id, int(job["id"])),
+                        "image/jpeg",
+                    )
+            job["video_path"] = remote_video
 
-        platforms = json.loads(job["platforms"])
-        if not platforms:
-            if database.cancellation_requested(job["id"]):
-                raise JobCancelled
-            database.update_job(job["id"], "completed", video_path=str(video_path))
-            return
+            platforms = json.loads(job["platforms"])
+            if not platforms:
+                if database.cancellation_requested(job["id"]):
+                    raise JobCancelled
+                database.update_job(job["id"], "completed", video_path=remote_video)
+                if generated_video:
+                    cleanup_generated_media(generated_video)
+                return
 
-        database.update_job(job["id"], "publishing", video_path=str(video_path))
-        metadata = dict(title=job["title"], description=job["description"], hashtags=job["hashtags"])
-        waiting = False
-        for platform in platforms:
+            database.update_job(job["id"], "publishing", video_path=remote_video)
+            metadata = dict(title=job["title"], description=job["description"], hashtags=job["hashtags"])
+            waiting = False
+            for platform in platforms:
+                if database.cancellation_requested(job["id"]):
+                    raise JobCancelled
+                try:
+                    result = publish(platform, job.get("owner_id"), video_path, metadata)
+                    database.update_publication(job["id"], platform, "published", **result)
+                except RuntimeError as exc:
+                    waiting = True
+                    database.update_publication(job["id"], platform, "waiting", error=str(exc))
             if database.cancellation_requested(job["id"]):
                 raise JobCancelled
-            try:
-                result = publish(platform, video_path, metadata)
-                database.update_publication(job["id"], platform, "published", **result)
-            except RuntimeError as exc:
-                waiting = True
-                database.update_publication(job["id"], platform, "waiting", error=str(exc))
-        if database.cancellation_requested(job["id"]):
-            raise JobCancelled
-        database.update_job(job["id"], "waiting_for_connections" if waiting else "published")
+            database.update_job(job["id"], "waiting_for_connections" if waiting else "published")
+            if generated_video:
+                cleanup_generated_media(generated_video)
     except JobCancelled:
+        references = (job.get("video_path"), job.get("source_path"))
         database.delete_job(job["id"])
+        for reference in {value for value in references if storage.is_remote(value)}:
+            if database.media_reference_count(reference) == 0:
+                try:
+                    storage.delete_object(reference)
+                    storage.delete_object(storage.thumbnail_reference(reference))
+                except RuntimeError:
+                    pass
     except (OSError, subprocess.CalledProcessError, RuntimeError) as exc:
         database.update_job(job["id"], "failed", error=str(exc))
 
@@ -160,6 +254,11 @@ def worker_loop(stop_event: threading.Event) -> None:
         if job:
             process_job(job)
         else:
+            try:
+                if migrate_one_local_media():
+                    continue
+            except RuntimeError:
+                pass
             stop_event.wait(2)
 
 

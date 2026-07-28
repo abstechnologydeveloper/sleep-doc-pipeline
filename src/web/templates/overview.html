@@ -2,7 +2,7 @@
 {% block content %}
 <div class="page-heading">
   <div><p class="eyebrow">Workspace</p><h1>Overview</h1><p>Monitor production, review finished media, and move quickly between workflows.</p></div>
-  <a class="button primary" href="/storytelling">Create story</a>
+  {% if is_admin %}<a class="button primary" href="/admin/customers">Manage customers</a>{% else %}<a class="button primary" href="/storytelling">Create story</a>{% endif %}
 </div>
 
 <div class="metric-grid">
@@ -18,13 +18,12 @@
     {% include '_job_table.html' %}
   </section>
   <section class="panel">
-    <div class="section-heading"><div><h2>Publishing connections</h2><p>Official platform API readiness.</p></div></div>
-    {% include '_connectors.html' %}
+    {% if is_admin %}<div class="section-heading"><div><h2>Administration</h2><p>Review creators, usage, account status, and free-tier limits.</p></div></div><a class="button secondary" href="/admin/customers">Open customers</a>{% else %}<div class="section-heading"><div><h2>Publishing connections</h2><p>Official platform API readiness.</p></div></div>{% include '_connectors.html' %}{% endif %}
   </section>
 </div>
 
 <section class="panel">
-  <div class="section-heading"><div><h2>Latest media</h2><p>Finished videos ready to review or publish.</p></div><a href="/social">Open media library</a></div>
+  <div class="section-heading"><div><h2>Latest media</h2><p>Finished videos ready to review{% if not is_admin %} or publish{% endif %}.</p></div>{% if not is_admin %}<a href="/social">Open media library</a>{% endif %}</div>
   {% include '_media_grid.html' %}
 </section>
 {% endblock %}

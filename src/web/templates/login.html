@@ -2,13 +2,16 @@
 {% block content %}
 <section class="login-panel">
   <div class="login-brand"><span class="brand-mark">S</span><div><strong>Sleep Studio</strong><small>Content production workspace</small></div></div>
-  <div><p class="eyebrow">Administrator access</p><h1>Welcome back</h1><p>Sign in to manage video creation and publishing.</p></div>
+  <div><p class="eyebrow">Creator access</p><h1>Create without passwords</h1><p>Use a secure email link or your Google account.</p></div>
   {% if error %}<div class="alert error">{{ error }}</div>{% endif %}
-  <form method="post" class="studio-form">
+  {% if sent %}<div class="alert success">If that email can receive messages, a sign-in link is on its way.</div>{% endif %}
+  {% if google_enabled %}<a class="button google-button" href="/auth/google">Continue with Google</a><div class="auth-divider"><span>or</span></div>{% endif %}
+  <form method="post" action="/auth/email" class="studio-form">
     <input type="hidden" name="csrf" value="{{ csrf }}">
-    <label>Username<input name="username" autocomplete="username" required autofocus></label>
-    <label>Password<input type="password" name="password" autocomplete="current-password" required></label>
-    <button class="button primary" type="submit">Sign in</button>
+    <label>Email address<input type="email" name="email" autocomplete="email" required autofocus placeholder="you@example.com"></label>
+    <button class="button primary" type="submit">Email me a sign-in link</button>
   </form>
+  <p class="auth-note">New here? Your free creator account is made automatically after verification.</p>
+  <a class="text-button" href="/">Back to home</a>
 </section>
 {% endblock %}

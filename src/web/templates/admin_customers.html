@@ -1,0 +1,19 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="page-heading"><div><p class="eyebrow">Administration</p><h1>Customers</h1><p>Review creators, usage, account status, and free-tier limits.</p></div></div>
+{% if request.query_params.get('onboarded') == 'created' %}<div class="alert success">Creator account added. The customer can now verify this email to sign in.</div>{% elif request.query_params.get('onboarded') == 'exists' %}<div class="alert error">That email already has an account.</div>{% endif %}
+<section class="panel">
+  <div class="section-heading"><div><h2>Onboard customer</h2><p>Add the creator's email. They will use email verification or Google to sign in without a password.</p></div></div>
+  <form method="post" action="/admin/customers" class="limit-form"><input type="hidden" name="csrf" value="{{ csrf }}"><label>Customer email<input type="email" name="email" autocomplete="email" required placeholder="creator@example.com"></label><button class="button primary" type="submit">Add customer</button></form>
+</section>
+<section class="panel">
+  <div class="table-wrap"><table class="customer-table">
+    <thead><tr><th>Creator</th><th>Plan</th><th>Jobs</th><th>This month</th><th>Active</th><th>Joined</th><th>Limits and status</th></tr></thead>
+    <tbody>{% for customer in customers %}
+      <tr><td><strong>{{ customer.name or customer.email }}</strong><small>{{ customer.email }}</small></td><td><span class="status">{{ customer.role|title }} · {{ customer.plan|title }}</span></td><td>{{ customer.total_jobs }}</td><td>{{ customer.monthly_jobs or 0 }} / {{ customer.monthly_job_limit }}</td><td>{{ customer.active_jobs or 0 }}</td><td class="muted">{{ customer.created_at[:10] }}</td><td>
+        {% if customer.role == 'creator' %}<form class="limit-form" method="post" action="/admin/customers/{{ customer.id }}/limits"><input type="hidden" name="csrf" value="{{ csrf }}"><label>Monthly<input type="number" name="monthly_job_limit" min="0" max="10000" value="{{ customer.monthly_job_limit }}"></label><label>Max minutes<input type="number" name="max_minutes_per_job" min="0.5" max="600" step="0.5" value="{{ customer.max_minutes_per_job }}"></label><label>Status<select name="status"><option value="active" {{ 'selected' if customer.status == 'active' else '' }}>Active</option><option value="suspended" {{ 'selected' if customer.status == 'suspended' else '' }}>Suspended</option></select></label><button class="button secondary" type="submit">Save</button></form>{% else %}<span class="muted">Protected administrator</span>{% endif %}
+      </td></tr>
+    {% else %}<tr><td colspan="7" class="empty-state">No customers yet.</td></tr>{% endfor %}</tbody>
+  </table></div>
+</section>
+{% endblock %}

@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="Turn a simple idea into an original narrated storytelling video with visuals, captions, sound, and a thumbnail.">
+  <title>Sleep Studio · Stories made ready to watch</title>
+  <link rel="stylesheet" href="/static/style.css?v=20260728-1">
+</head>
+<body class="marketing-body">
+  <header class="marketing-nav"><a class="brand" href="/"><span class="brand-mark">S</span><span><strong>Sleep Studio</strong><small>AI storytelling workspace</small></span></a><nav><a href="#how">How it works</a><a href="#features">Features</a>{% if current_user %}<a class="button primary" href="/app">Open workspace</a>{% else %}<a href="/login">Sign in</a><a class="button primary" href="/login">Start creating free</a>{% endif %}</nav></header>
+  <main class="marketing-main">
+    <section class="hero"><div><p class="eyebrow">From one idea to a complete story</p><h1>Make stories people want to watch—and remember.</h1><p class="hero-copy">Sleep Studio writes the narration, plans every meaningful visual, creates the voice, adds captions and sound, and delivers a finished video with a colorful thumbnail.</p><div class="hero-actions">{% if current_user %}<a class="button primary" href="{{ '/app' if current_user.role == 'admin' else '/storytelling' }}">{{ 'Open administration' if current_user.role == 'admin' else 'Create your next story' }}</a>{% else %}<a class="button primary" href="/login">Create your first story free</a><a class="button secondary" href="#how">See how it works</a>{% endif %}</div><div class="trust-row"><span>No password</span><span>Original stories</span><span>Creator-owned workspace</span></div></div><div class="hero-visual"><div class="story-preview"><div class="preview-sky"><span class="preview-moon"></span><span class="preview-title">WHAT WAS<br>BEHIND THE DOOR?</span></div><div class="preview-timeline"><i></i><i></i><i></i><i></i></div><div class="preview-status"><span>Story ready</span><strong>▶ 8:42</strong></div></div></div></section>
+
+    <section class="logo-strip"><span>Built for</span><strong>YouTube storytellers</strong><strong>Bedtime channels</strong><strong>Children’s creators</strong><strong>Mystery narrators</strong></section>
+
+    <section id="how" class="marketing-section"><div class="section-intro"><p class="eyebrow">Simple production</p><h2>One workspace. Four clear steps.</h2><p>You keep control of the idea while the repetitive production work happens in the background.</p></div><div class="feature-grid steps-grid"><article><span>01</span><h3>Describe your story</h3><p>Enter a topic or let the system suggest an original concept.</p></article><article><span>02</span><h3>Build every scene</h3><p>Meaningful story beats receive matching widescreen visuals.</p></article><article><span>03</span><h3>Add voice and motion</h3><p>Natural narration, captions, transitions and quiet sound bring it together.</p></article><article><span>04</span><h3>Review and share</h3><p>Download the video and thumbnail or create a public viewing link.</p></article></div></section>
+
+    <section id="features" class="marketing-section split-feature"><div><p class="eyebrow">Made for real creators</p><h2>Your audience sees a story, not a slideshow.</h2><p>Visuals follow what is actually happening. Characters, locations, clothing and lighting remain described consistently across the production.</p><ul class="check-list"><li>Dynamic story-based scene planning</li><li>Audience-aware writing and visual styles</li><li>Synchronized captions and narration</li><li>Colorful curiosity-driven thumbnails</li><li>Safe resumable production</li><li>Private creator workspaces</li></ul></div><div class="feature-stack"><article><strong>Original by default</strong><p>No copying or close paraphrasing of real source material.</p></article><article><strong>Built to recover</strong><p>Finished stages are reused when a provider or rendering step fails.</p></article><article><strong>Ready to share</strong><p>Public links include a WhatsApp-friendly thumbnail preview.</p></article></div></section>
+
+    <section class="cta-panel"><p class="eyebrow">Start with the free tier</p><h2>Your next story begins with one sentence.</h2><p>Sign in securely with email or Google. No password to remember.</p><a class="button primary" href="{{ '/app' if current_user else '/login' }}">{{ 'Open your workspace' if current_user else 'Create your free account' }}</a></section>
+  </main>
+  <footer class="marketing-footer"><span>© 2026 Sleep Studio</span><span>Original storytelling production</span></footer>
+</body>
+</html>

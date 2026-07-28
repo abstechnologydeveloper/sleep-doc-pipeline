@@ -9,18 +9,64 @@ This project generates a complete narrated sleep-story video:
 5. FFmpeg adds cinematic movement, contextual effects, transitions, captions,
    narration, and quiet sound effects, then creates a dedicated thumbnail.
 
-It also includes a Dockerized admin dashboard for automatic generation,
-manual video uploads, scheduling, and multi-platform publishing status.
+It also includes a Dockerized multi-tenant creator application for automatic
+generation, manual video uploads, scheduling, and multi-platform publishing status.
 
-## Admin dashboard
+## Accounts and creator workspaces
 
-The responsive admin uses a compact sidebar with five workspaces:
+The public landing page is available at `/`, and each signed-in creator uses the
+private workspace at `/app`. Authentication is passwordless: creators can request
+a 15-minute, one-use email link or continue with Google. Every new job and uploaded
+video belongs to the creator who made it; creators cannot access another account's
+work through pages, media URLs, WebSockets, or job actions.
+
+Set `ADMIN_EMAIL` to the administrator's email address. That account receives the
+administrator role only after the address is verified through email or Google. The
+administrator-only **Customers** workspace lists all accounts and allows free-tier
+monthly story limits, maximum story duration, and account status to be changed.
+The administrator is administration-only and onboards normal creator accounts from
+the **Customers** workspace. Creators then verify their email or use Google to sign in.
+New creators default to three stories per UTC month, ten minutes per story, and one
+active generation at a time. The complete policy is in `BUSINESS_RULES.md`.
+
+Passwordless authentication requires these production settings:
+
+```env
+ADMIN_EMAIL=admin@example.com
+ADMIN_SESSION_SECRET=replace_with_at_least_32_random_bytes
+AUTH_IP_HASH_SALT=replace_with_an_independent_random_value
+AUTH_FROM_EMAIL=Sleep Studio <login@your-verified-domain.example>
+RESEND_API_KEY=your_resend_api_key
+GOOGLE_OAUTH_CLIENT_ID=your_google_client_id
+GOOGLE_OAUTH_CLIENT_SECRET=your_google_client_secret
+PUBLIC_BASE_URL=https://sleep-studio.69.197.164.87.nip.io
+COOKIE_SECURE=true
+POSTGRES_PASSWORD=replace_with_a_long_random_password
+DATABASE_URL=postgresql://sleep_studio:replace_with_a_long_random_password@postgres:5432/sleep_studio
+OAUTH_TOKEN_ENCRYPTION_KEY=replace_with_at_least_32_random_bytes
+R2_ACCOUNT_ID=your_cloudflare_account_id
+R2_ACCESS_KEY_ID=your_r2_access_key_id
+R2_SECRET_ACCESS_KEY=your_r2_secret_access_key
+R2_BUCKET=your_private_r2_bucket
+R2_PUBLIC_DOMAIN=pub-24bed8d26f7f4b77aac16769cc765325.r2.dev
+```
+
+Register this exact Google OAuth redirect URI:
+`https://sleep-studio.69.197.164.87.nip.io/auth/google/callback`.
+
+## Application workspaces
+
+Creators use a compact sidebar with five workspaces:
 
 - **Overview:** production counts, recent jobs, finished media, and connector status.
 - **Storytelling:** generate complete narrated videos for the shared media library.
 - **Ambient Video:** a prepared but disabled workspace for the future ambient pipeline.
 - **Social Posts:** upload finished media or publish a library video with shared metadata.
 - **Jobs:** filter and manage generation, media-upload, and publishing jobs.
+
+Administrators see only the operational overview, all jobs, and customer management;
+creator generation, uploads, publishing forms, and channel connections are denied by
+the server as well as hidden from the navigation.
 
 Job status, overview counts, and newly completed media update through an authenticated
 WebSocket connection. Publishing uses a server-validated media ID rather than accepting
@@ -39,13 +85,43 @@ docker compose up -d --build
 The production dashboard is available at
 `https://sleep-studio.69.197.164.87.nip.io`. Nginx terminates HTTPS and proxies
 to port `8090`, which is bound to localhost so it cannot bypass TLS. Use
-`COOKIE_SECURE=true`. SQLite state, uploads, and generated media are
-bind-mounted so container replacement does not erase them.
+`COOKIE_SECURE=true`. PostgreSQL uses the private `postgres_data` Docker volume.
+Pipeline working directories remain bind-mounted only for rendering and failed-job
+recovery; creator uploads, completed videos, and thumbnails are stored privately in
+Cloudflare R2. On the first PostgreSQL startup,
+the application imports the existing `data/admin.sqlite3` records once and leaves
+the source file untouched as a recovery copy.
+
+### Cloudflare R2 media storage
+
+Create an R2 API token restricted to the Sleep Studio bucket and configure the five
+`R2_*` variables above. Do not copy hardcoded credentials from another repository;
+rotate any credential that has previously been committed to source control.
+
+Uploads stream directly to R2. Generated videos and thumbnails move to R2 after a
+successful render, and the corresponding local video, thumbnail, audio, scene-image,
+and sound-effect files are removed. Failed generations retain working files so retry
+can resume safely. Existing finished local media migrates to R2 gradually while the
+background worker is idle. Private videos are delivered through authenticated routes
+or revocable public share tokens; the bucket does not need public access.
 
 Social posting uses official platform APIs. Each connector remains in
 `waiting_for_connections` until its approved OAuth app and account identifiers
 are configured. TikTok requires Content Posting API approval; Instagram
 requires a Professional account linked to a Facebook Page.
+
+### Creator YouTube connections
+
+Each non-admin creator connects their own YouTube channel from **Social Posts → Connections**.
+Tokens are encrypted in PostgreSQL with `OAUTH_TOKEN_ENCRYPTION_KEY`; never change
+that key without reconnecting every channel. YouTube uses the same global
+`GOOGLE_OAUTH_CLIENT_ID` and `GOOGLE_OAUTH_CLIENT_SECRET` configured for sign-in;
+individual creators never enter application client credentials.
+
+Enable YouTube Data API v3 and register this redirect URI:
+`https://sleep-studio.69.197.164.87.nip.io/connections/youtube/callback`.
+Uploads default to private so creators can review them before publishing. YouTube
+quota, channel eligibility, and Google app verification still apply.
 
 ### GitHub Actions deployment
 
@@ -66,7 +142,7 @@ generated scripts, audio, images, sounds, thumbnails, and videos from rsync dele
 - Python 3.12 with the existing project dependencies
 - FFmpeg available on `PATH`
 - A Gemini API key
-- A Cloudflare account with Workers AI access
+- A Cloudflare account with Workers AI and private R2 access
 - An optional ElevenLabs API key for footsteps, movement, environment, and transition sounds
 
 FLUX.1 Schnell is a hosted diffusion model. Cloudflare includes 10,000 free
@@ -104,7 +180,8 @@ generate_images.py   Stable image-generation entry point
 generate_sounds.py   Optional story sound-effects entry point
 assemble_video.py    Stable video-assembly entry point
 
-data/ scripts/ audio/ images/ sounds/ videos/ thumbnails/   Persistent runtime output
+data/ scripts/   Persistent application and resumable-script data
+audio/ images/ sounds/ videos/ thumbnails/   Temporary rendering and recovery data
 ```
 
 Implementation code lives under `src/`. The small root entry points preserve

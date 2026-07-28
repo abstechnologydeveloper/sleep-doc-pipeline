@@ -4,22 +4,22 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>{{ title or 'Sleep Studio' }}</title>
-  <link rel="stylesheet" href="/static/style.css?v=20260726-3">
-  <script defer src="/static/jobs.js?v=20260726-3"></script>
+  <link rel="stylesheet" href="/static/style.css?v=20260728-1">
+  <script defer src="/static/jobs.js?v=20260728-1"></script>
 </head>
 <body>
-{% if request.session.get('authenticated') %}
+{% if current_user %}
   <div class="app-shell">
     <aside class="sidebar" id="studio-sidebar">
-      <a class="brand" href="/">
+      <a class="brand" href="/app">
         <span class="brand-mark">S</span>
         <span><strong>Sleep Studio</strong><small>Content workspace</small></span>
       </a>
       <nav aria-label="Studio navigation">
-        <a class="nav-item {{ 'active' if active_section == 'overview' else '' }}" href="/">
+        <a class="nav-item {{ 'active' if active_section == 'overview' else '' }}" href="/app">
           <span class="nav-icon">O</span><span>Overview</span>
         </a>
-        <a class="nav-item {{ 'active' if active_section == 'storytelling' else '' }}" href="/storytelling">
+        {% if not is_admin %}<a class="nav-item {{ 'active' if active_section == 'storytelling' else '' }}" href="/storytelling">
           <span class="nav-icon">S</span><span>Storytelling</span>
         </a>
         <a class="nav-item {{ 'active' if active_section == 'ambient' else '' }}" href="/ambient">
@@ -28,12 +28,14 @@
         <a class="nav-item {{ 'active' if active_section == 'social' else '' }}" href="/social">
           <span class="nav-icon">P</span><span>Social Posts</span>
         </a>
+        {% endif %}
         <a class="nav-item {{ 'active' if active_section == 'jobs' else '' }}" href="/jobs">
           <span class="nav-icon">J</span><span>Jobs</span>
         </a>
+        {% if is_admin %}<a class="nav-item {{ 'active' if active_section == 'customers' else '' }}" href="/admin/customers"><span class="nav-icon">C</span><span>Customers</span></a>{% endif %}
       </nav>
       <div class="sidebar-footer">
-        <div class="admin-identity"><span class="avatar">A</span><span><strong>Administrator</strong><small>Studio admin</small></span></div>
+        <div class="admin-identity"><span class="avatar">{{ (current_user.name or current_user.email)[0]|upper }}</span><span><strong>{{ current_user.name or current_user.email }}</strong><small>{% if is_admin %}Administrator{% else %}{{ current_user.plan|title }} creator{% endif %}</small></span></div>
         <form method="post" action="/logout">
           <input type="hidden" name="csrf" value="{{ csrf }}">
           <button class="text-button" type="submit">Sign out</button>
@@ -44,14 +46,14 @@
     <div class="workspace">
       <header class="mobile-header">
         <button class="menu-button" data-sidebar-toggle aria-controls="studio-sidebar" aria-expanded="false">☰</button>
-        <a href="/">Sleep Studio</a>
+        <a href="/app">Sleep Studio</a>
       </header>
       <main>
 {% else %}
   <main class="auth-shell">
 {% endif %}
         {% block content %}{% endblock %}
-{% if request.session.get('authenticated') %}
+{% if current_user %}
       </main>
     </div>
   </div>
