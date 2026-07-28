@@ -58,5 +58,5 @@ jobs:
       - name: Deploy and clean old Docker artifacts
         run: ./deploy.sh
       - name: Show service status
-        if: always()
+        if: success()
         run: docker compose --project-directory /home/administrator/sleep-doc-pipeline ps
