@@ -101,7 +101,25 @@ def _json_request(url: str, *, data: bytes | None = None, headers: dict | None =
     try:
         with request.urlopen(api_request, timeout=30) as response:
             return json.loads(response.read().decode("utf-8"))
-    except (error.HTTPError, error.URLError, TimeoutError, ValueError) as exc:
+    except error.HTTPError as exc:
+        detail = ""
+        try:
+            payload = json.loads(exc.read().decode("utf-8"))
+            provider_error = payload.get("error", {})
+            if isinstance(provider_error, dict):
+                detail = str(
+                    provider_error.get("message")
+                    or provider_error.get("status")
+                    or provider_error.get("code")
+                    or ""
+                )
+            else:
+                detail = str(payload.get("error_description") or provider_error or "")
+        except (ValueError, UnicodeDecodeError):
+            pass
+        suffix = f": {detail}" if detail else ""
+        raise RuntimeError(f"YouTube request failed with HTTP {exc.code}{suffix}") from exc
+    except (error.URLError, TimeoutError, ValueError) as exc:
         raise RuntimeError("YouTube rejected the connection request") from exc
 
 

@@ -5,5 +5,18 @@
     <span><strong>{{ connector.name|title }}</strong><small>{% if connector.name == 'youtube' %}Connect the channel that should receive your videos.{% else %}This channel is not available yet.{% endif %}</small></span>
     <span>{% if connector.name != 'youtube' %}<span class="status">Coming later</span>{% elif connector.configured %}<span class="status status-completed">Connected{% if connector.account_name %}: {{ connector.account_name }}{% endif %}</span><form method="post" action="/connections/youtube/disconnect"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="text-button" type="submit">Disconnect</button></form>{% elif connector.connect_url %}<a class="button secondary" href="{{ connector.connect_url }}">Connect YouTube</a>{% else %}<span class="status status-waiting_for_connections">Not available</span>{% endif %}</span>
   </div>
+  {% if connector.name == 'youtube' and not connector.configured %}
+  <div class="connection-guide">
+    <strong>Before you connect YouTube</strong>
+    <p>You need a YouTube channel, not only a Google account.</p>
+    <ol class="step-list">
+      <li><span>1</span><div><strong>Open YouTube</strong><small>Sign in with the Google account you want to use.</small></div></li>
+      <li><span>2</span><div><strong>Create your channel</strong><small>Choose your channel name and finish the short YouTube setup.</small></div></li>
+      <li><span>3</span><div><strong>Come back here</strong><small>Select Connect YouTube and choose the same Google account.</small></div></li>
+      <li><span>4</span><div><strong>Allow access</strong><small>Approve the YouTube permissions so Sleep Studio can publish your videos.</small></div></li>
+    </ol>
+    <a class="text-link" href="https://support.google.com/youtube/answer/1646861" target="_blank" rel="noopener noreferrer">Read YouTube's channel guide ↗</a>
+  </div>
+  {% endif %}
 {% endfor %}
 </div>

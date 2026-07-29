@@ -130,6 +130,11 @@ small { display: block; color: var(--muted); line-height: 1.35; }
 .metric-grid strong { font-size: 25px; }
 
 .studio-form { display: grid; gap: 14px; }
+.inline-subscription-form {
+  grid-template-columns: minmax(180px, 1fr) minmax(150px, .65fr) auto;
+  align-items: end;
+}
+.inline-subscription-form .button { margin-bottom: 1px; white-space: nowrap; }
 .studio-form label, .filter-bar label { display: grid; gap: 7px; color: var(--text); font-size: 13px; font-weight: 600; }
 .studio-form label > span { color: var(--muted); font-size: 11px; font-weight: 400; }
 input, textarea, select {
@@ -210,6 +215,13 @@ tr:last-child td { border-bottom: 0; }
 .connector-row:last-child { border-bottom: 0; }
 .connector-row strong { display: block; font-size: 13px; }
 .connector-row small { max-width: 300px; margin-top: 2px; font-size: 10px; }
+.connection-guide { margin: 10px 0 4px; padding: 14px; border: 1px solid var(--border); border-radius: 9px; background: var(--panel-soft); }
+.connection-guide > strong { font-size: 13px; }
+.connection-guide > p { margin: 4px 0 9px; font-size: 11px; }
+.connection-guide .step-list { margin-bottom: 10px; }
+.connection-guide .step-list li { padding: 8px 0; }
+.connection-guide .step-list small { font-size: 10px; }
+.connection-guide .text-link { font-size: 11px; font-weight: 700; }
 .platform-mark { display: grid; place-items: center; width: 29px; height: 29px; border: 1px solid #394050; border-radius: 7px; background: #20242d; font-size: 11px; font-weight: 800; }
 
 .media-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; }
@@ -456,7 +468,8 @@ html[data-theme="dark"] .cta-panel { border-color: #3c4770; background: radial-g
   .workspace main { padding: 24px 16px 55px; }
   .page-heading { align-items: flex-start; }
   .page-heading > .button { flex: 0 0 auto; }
-  .field-row, .filter-bar { grid-template-columns: 1fr; }
+  .field-row, .filter-bar, .inline-subscription-form { grid-template-columns: 1fr; }
+  .inline-subscription-form .button { width: 100%; }
   .storage-strip { grid-template-columns: 1fr; gap: 8px; }
   .filter-bar .button { width: 100%; }
   .marketing-nav nav > a:not(.button) { display: none; }

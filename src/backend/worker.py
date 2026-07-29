@@ -84,6 +84,7 @@ def run_automatic(job, log_file) -> Path:
     command.extend([
         "--title", job["title"],
         "--voice", job.get("narration_voice") or "Kore",
+        "--voice-direction", job.get("voice_direction") or "neutral",
         "--max-images", str(job.get("max_images") or 8),
         "--niche", job.get("creator_niche") or "",
         "--audience", job.get("target_audience") or "",

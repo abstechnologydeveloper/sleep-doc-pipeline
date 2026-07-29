@@ -62,7 +62,9 @@ def split_into_chunks(text: str, max_chars: int = MAX_CHARS_PER_CHUNK) -> list[s
     return chunks
 
 
-def generate_chunk_audio(client: genai.Client, text: str, voice: str) -> bytes:
+def generate_chunk_audio(
+    client: genai.Client, text: str, voice: str, voice_direction: str
+) -> bytes:
     last_error = None
 
     for attempt in range(1, MAX_RETRIES + 1):
@@ -71,7 +73,8 @@ def generate_chunk_audio(client: genai.Client, text: str, voice: str) -> bytes:
                 model=MODEL,
                 contents=(
                     "Synthesize clear, audible speech from the transcript below. "
-                    "Read every word calmly and exactly as written.\n\n"
+                    "Read every word calmly and exactly as written. "
+                    f"Use a {voice_direction} voice quality.\n\n"
                     f"TRANSCRIPT:\n{text}"
                 ),
                 config=types.GenerateContentConfig(
@@ -153,13 +156,14 @@ def narrate_chunk(
     text: str,
     output_path: Path,
     voice: str,
+    voice_direction: str,
 ) -> int:
     """Generate and save one chunk, returning its one-based chunk number."""
     print(
         f"  Narrating chunk {chunk_number}/{total_chunks} "
         f"({len(text)} chars)..."
     )
-    pcm = generate_chunk_audio(client, text, voice)
+    pcm = generate_chunk_audio(client, text, voice, voice_direction)
     temporary_path = output_path.with_suffix(".wav.tmp")
     write_wave(temporary_path, pcm)
     temporary_path.replace(output_path)
@@ -179,6 +183,12 @@ def parse_args() -> argparse.Namespace:
         "--voice",
         default=DEFAULT_VOICE,
         help=f"Gemini prebuilt narration voice (default: {DEFAULT_VOICE})",
+    )
+    parser.add_argument(
+        "--voice-direction",
+        default="neutral",
+        choices=("neutral", "masculine", "feminine", "youthful", "mature", "deep", "warm", "bright"),
+        help="Requested voice quality",
     )
     parser.add_argument(
         "--workers",
@@ -258,6 +268,7 @@ def generate_pending_chunks(
     total_chunks: int,
     requested_workers: int,
     voice: str,
+    voice_direction: str,
 ) -> None:
     if not pending_chunks:
         return
@@ -274,6 +285,7 @@ def generate_pending_chunks(
                 chunk,
                 chunk_path,
                 voice,
+                voice_direction,
             ): chunk_number
             for chunk_number, chunk, chunk_path in pending_chunks
         }
@@ -357,7 +369,11 @@ def main() -> None:
     client = genai.Client(api_key=api_key)
     pending_chunks = collect_pending_chunks(chunks, chunk_dir)
     print(f"Narration voice: {args.voice}")
-    generate_pending_chunks(client, pending_chunks, len(chunks), args.workers, args.voice)
+    print(f"Voice direction: {args.voice_direction}")
+    generate_pending_chunks(
+        client, pending_chunks, len(chunks), args.workers,
+        args.voice, args.voice_direction,
+    )
 
     # Stitch all chunk files together into the final audio file.
     print("\nAll chunks ready. Stitching into final audio file...")

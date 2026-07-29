@@ -47,25 +47,50 @@ PLANS = {
 PAID_PLAN_KEYS = ("basic", "pro", "studio")
 PLAN_RANK = {"free": 0, "basic": 1, "pro": 2, "studio": 3}
 
-# Google Gemini prebuilt TTS voices. Labels describe tone rather than promising
-# a specific gender, which can be subjective across languages and listeners.
+# Google Gemini prebuilt TTS voices. Voice direction is selected separately
+# because the named voices are officially described by tone, not gender.
 VOICE_OPTIONS = {
-    "Kore": "Kore — firm and clear",
-    "Achird": "Achird — friendly",
-    "Algenib": "Algenib — gravelly",
-    "Algieba": "Algieba — smooth",
+    "Zephyr": "Zephyr — bright",
+    "Puck": "Puck — upbeat",
     "Charon": "Charon — informative",
-    "Despina": "Despina — smooth",
-    "Erinome": "Erinome — clear",
-    "Fenrir": "Fenrir — excitable",
-    "Laomedeia": "Laomedeia — upbeat",
+    "Kore": "Kore — firm",
+    "Fenrir": "Fenrir — excited",
     "Leda": "Leda — youthful",
     "Orus": "Orus — firm",
-    "Puck": "Puck — upbeat",
-    "Sulafat": "Sulafat — warm",
-    "Umbriel": "Umbriel — relaxed",
+    "Aoede": "Aoede — light and breezy",
+    "Callirrhoe": "Callirrhoe — easy-going",
+    "Autonoe": "Autonoe — bright",
+    "Enceladus": "Enceladus — breathy",
+    "Iapetus": "Iapetus — clear",
+    "Umbriel": "Umbriel — easy-going",
+    "Algieba": "Algieba — smooth",
+    "Despina": "Despina — smooth",
+    "Erinome": "Erinome — clear",
+    "Algenib": "Algenib — rough and deep",
+    "Rasalgethi": "Rasalgethi — informative",
+    "Laomedeia": "Laomedeia — upbeat",
+    "Achernar": "Achernar — soft",
+    "Alnilam": "Alnilam — firm",
+    "Schedar": "Schedar — even",
+    "Gacrux": "Gacrux — mature",
+    "Pulcherrima": "Pulcherrima — direct",
+    "Achird": "Achird — friendly",
+    "Zubenelgenubi": "Zubenelgenubi — casual",
     "Vindemiatrix": "Vindemiatrix — gentle",
-    "Zephyr": "Zephyr — bright",
+    "Sadachbia": "Sadachbia — lively",
+    "Sadaltager": "Sadaltager — knowledgeable",
+    "Sulafat": "Sulafat — warm",
+}
+
+VOICE_DIRECTIONS = {
+    "neutral": "Natural / no preference",
+    "masculine": "More masculine",
+    "feminine": "More feminine",
+    "youthful": "Youthful",
+    "mature": "Mature",
+    "deep": "Deep",
+    "warm": "Warm",
+    "bright": "Bright",
 }
 
 NICHE_OPTIONS = {
@@ -79,15 +104,69 @@ NICHE_OPTIONS = {
     "folklore": "Folklore, legends and cultural tales",
     "motivation": "Reflective and motivational stories",
     "documentary": "Narrative documentaries",
+    "war_history": "War and military history",
+    "deep_history": "Deep history and ancient worlds",
+    "science": "Science and discoveries",
+    "space": "Space and astronomy",
+    "technology": "Technology and inventions",
+    "true_crime": "True crime and investigations",
+    "adventure": "Adventure and survival",
+    "romance": "Romance and relationships",
+    "comedy": "Comedy and funny stories",
+    "business": "Business and success stories",
+    "biography": "Biographies and famous lives",
+    "religion": "Faith and religious stories",
+    "african_folklore": "African folklore and legends",
+    "mythology": "Mythology and ancient gods",
+    "education": "Simple learning videos",
+    "animals": "Animals and wildlife",
+    "ocean": "Oceans and underwater life",
+    "future": "The future and imagined worlds",
+    "unsolved": "Unsolved events and strange places",
+    "family": "Family and life lessons",
 }
 
 CONTENT_STYLES = {
     "cinematic": "Cinematic and realistic",
-    "animated": "Colorful 3D animation",
-    "storybook": "Illustrated storybook",
+    "photorealistic": "Photo-realistic",
     "documentary": "Documentary realism",
+    "historical_documentary": "History documentary",
+    "ancient_history": "Ancient history",
+    "deep_history": "Deep history",
+    "war_history": "War history",
+    "military_documentary": "Military documentary",
+    "scientific": "Scientific pictures",
+    "space_science": "Space and astronomy",
+    "medical_illustration": "Medical illustration",
+    "nature_documentary": "Nature documentary",
+    "wildlife": "Wildlife photography",
+    "archaeology": "Archaeology and ruins",
+    "museum_archive": "Museum and archive",
+    "vintage_film": "Old vintage film",
+    "film_noir": "Black-and-white film noir",
     "gothic": "Gentle gothic atmosphere",
+    "horror": "Dark horror",
+    "dark_fantasy": "Dark fantasy",
+    "epic_fantasy": "Epic fantasy",
+    "folklore": "Folklore art",
+    "mythology": "Mythology art",
+    "animated_3d": "Colorful 3D animation",
+    "cartoon_2d": "Colorful 2D cartoon",
+    "storybook": "Children's storybook",
+    "watercolor": "Soft watercolor",
+    "oil_painting": "Classic oil painting",
+    "anime": "Anime",
+    "comic_book": "Comic book",
+    "graphic_novel": "Graphic novel",
+    "clay_animation": "Clay animation",
+    "paper_cutout": "Paper cutout",
     "minimal": "Calm and visually minimal",
+    "dreamy": "Soft and dreamy",
+    "cozy": "Warm and cozy",
+    "surreal": "Surreal dream world",
+    "cyberpunk": "Cyberpunk city",
+    "futuristic": "Clean futuristic",
+    "news_report": "News report style",
 }
 
 NICHE_PROMPTS = {
@@ -135,7 +214,13 @@ NICHE_PROMPTS = {
 
 
 def prompt_starters(niche: str) -> tuple[str, ...]:
-    specific = NICHE_PROMPTS.get(niche, ())
+    normalized = niche.strip().lower()
+    key = next(
+        (option_key for option_key, label in NICHE_OPTIONS.items()
+         if normalized in {option_key.lower(), label.lower()}),
+        normalized,
+    )
+    specific = NICHE_PROMPTS.get(key, ())
     return specific + (
         "A stranger arrives with one unusual object, changing a quiet community in an unexpected way.",
         "Tell a simple journey built around curiosity, one clear problem, and a satisfying emotional ending.",

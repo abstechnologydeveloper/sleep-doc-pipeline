@@ -62,6 +62,10 @@ def parse_args() -> argparse.Namespace:
         help="Optional post title used to create the video thumbnail",
     )
     parser.add_argument("--voice", default="Kore", help="Gemini narration voice")
+    parser.add_argument(
+        "--voice-direction", default="neutral",
+        help="Requested narration sound, such as masculine, feminine, warm, or deep",
+    )
     parser.add_argument("--niche", default="", help="Creator niche guidance")
     parser.add_argument("--audience", default="", help="Target audience guidance")
     parser.add_argument("--content-style", default="cinematic", help="Preferred visual style")
@@ -233,7 +237,8 @@ def main() -> None:
             print("Regenerating audio because caption timing data is missing.")
         run_step(
             "2/5 Generating narration audio",
-            [python, str(BASE_DIR / "generate_audio.py"), str(script_path), "--voice", args.voice],
+            [python, str(BASE_DIR / "generate_audio.py"), str(script_path),
+             "--voice", args.voice, "--voice-direction", args.voice_direction],
         )
     run_step(
         "3/5 Generating Cloudflare scene images",

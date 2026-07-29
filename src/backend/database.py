@@ -220,6 +220,7 @@ def initialize() -> None:
             """
             ALTER TABLE users ADD COLUMN IF NOT EXISTS max_images_per_job INTEGER NOT NULL DEFAULT 8;
             ALTER TABLE users ADD COLUMN IF NOT EXISTS narration_voice TEXT NOT NULL DEFAULT 'Kore';
+            ALTER TABLE users ADD COLUMN IF NOT EXISTS voice_direction TEXT NOT NULL DEFAULT 'neutral';
             ALTER TABLE users ADD COLUMN IF NOT EXISTS default_story_minutes REAL NOT NULL DEFAULT 2;
             ALTER TABLE users ADD COLUMN IF NOT EXISTS paystack_customer_code TEXT NOT NULL DEFAULT '';
             ALTER TABLE users ADD COLUMN IF NOT EXISTS channel_name TEXT NOT NULL DEFAULT '';
@@ -231,6 +232,7 @@ def initialize() -> None:
             ALTER TABLE users ADD COLUMN IF NOT EXISTS storage_limit_bytes BIGINT NOT NULL DEFAULT 1073741824;
             ALTER TABLE users ALTER COLUMN max_minutes_per_job SET DEFAULT 5;
             ALTER TABLE jobs ADD COLUMN IF NOT EXISTS narration_voice TEXT NOT NULL DEFAULT 'Kore';
+            ALTER TABLE jobs ADD COLUMN IF NOT EXISTS voice_direction TEXT NOT NULL DEFAULT 'neutral';
             ALTER TABLE jobs ADD COLUMN IF NOT EXISTS max_images INTEGER NOT NULL DEFAULT 8;
             ALTER TABLE jobs ADD COLUMN IF NOT EXISTS owner_job_number INTEGER;
             ALTER TABLE jobs ADD COLUMN IF NOT EXISTS creator_niche TEXT NOT NULL DEFAULT '';
@@ -238,6 +240,7 @@ def initialize() -> None:
             ALTER TABLE jobs ADD COLUMN IF NOT EXISTS content_style TEXT NOT NULL DEFAULT 'cinematic';
             ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS paystack_customer_code TEXT NOT NULL DEFAULT '';
             ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS payment_reference TEXT NOT NULL DEFAULT '';
+            ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'paystack';
             """
         )
         db.execute(
@@ -565,10 +568,10 @@ def create_story_job(
         cursor = db.execute(
             """INSERT INTO jobs
             (owner_id, owner_job_number, kind, status, topic, minutes, title, description, hashtags,
-             platforms, scheduled_at, source_path, narration_voice, max_images,
+             platforms, scheduled_at, source_path, narration_voice, voice_direction, max_images,
              creator_niche, target_audience, content_style,
              created_at, updated_at)
-            VALUES (?, ?, 'automatic', 'queued', ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, 'automatic', 'queued', ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?)
             RETURNING id""",
             (
                 owner_id,
@@ -581,6 +584,7 @@ def create_story_job(
                 json.dumps(platforms),
                 scheduled_at,
                 user["narration_voice"],
+                user["voice_direction"],
                 user["max_images_per_job"],
                 user["creator_niche"],
                 user["target_audience"],
@@ -995,15 +999,17 @@ def update_user_limits(
 def update_creator_settings(
     user_id: int, *, name: str, channel_name: str, creator_niche: str,
     target_audience: str, content_style: str, creator_goal: str,
-    narration_voice: str, default_story_minutes: float
+    narration_voice: str, voice_direction: str, default_story_minutes: float
 ) -> None:
     with connect() as db:
         db.execute(
             """UPDATE users SET name=?, channel_name=?, creator_niche=?,
             target_audience=?, content_style=?, creator_goal=?, narration_voice=?,
-            default_story_minutes=?, updated_at=? WHERE id=? AND role='creator'""",
+            voice_direction=?, default_story_minutes=?, updated_at=?
+            WHERE id=? AND role='creator'""",
             (name, channel_name, creator_niche, target_audience, content_style,
-             creator_goal, narration_voice, default_story_minutes, utc_now(), user_id),
+             creator_goal, narration_voice, voice_direction, default_story_minutes,
+             utc_now(), user_id),
         )
 
 
@@ -1012,6 +1018,54 @@ def subscription_for_user(user_id: int):
         return db.execute(
             "SELECT * FROM subscriptions WHERE user_id=?", (user_id,)
         ).fetchone()
+
+
+def grant_admin_subscription(
+    *, user_id: int, plan_key: str, days: int, reference: str
+) -> bool:
+    plan = plan_for(plan_key)
+    now = datetime.now(timezone.utc)
+    now_text = now.isoformat(timespec="seconds")
+    with connect() as db:
+        user = db.execute(
+            "SELECT id FROM users WHERE id=? AND role='creator' FOR UPDATE", (user_id,)
+        ).fetchone()
+        if not user:
+            return False
+        existing_subscription = db.execute(
+            "SELECT current_period_end FROM subscriptions WHERE user_id=? FOR UPDATE",
+            (user_id,),
+        ).fetchone()
+        period_start = now
+        if existing_subscription and existing_subscription["current_period_end"]:
+            try:
+                existing_end = datetime.fromisoformat(
+                    str(existing_subscription["current_period_end"])
+                )
+                if existing_end > now:
+                    period_start = existing_end
+            except (TypeError, ValueError):
+                pass
+        period_end = (period_start + timedelta(days=days)).isoformat(timespec="seconds")
+        db.execute(
+            """INSERT INTO subscriptions
+            (user_id, paystack_customer_code, payment_reference, plan, status,
+             current_period_end, source, created_at, updated_at)
+            VALUES (?, '', ?, ?, 'active', ?, 'admin', ?, ?)
+            ON CONFLICT(user_id) DO UPDATE SET
+              payment_reference=EXCLUDED.payment_reference,
+              plan=EXCLUDED.plan, status='active',
+              current_period_end=EXCLUDED.current_period_end,
+              source='admin', updated_at=EXCLUDED.updated_at""",
+            (user_id, reference, plan.key, period_end, now_text, now_text),
+        )
+        db.execute(
+            """UPDATE users SET plan=?, monthly_job_limit=?, max_minutes_per_job=?,
+            max_images_per_job=?, storage_limit_bytes=?, updated_at=? WHERE id=?""",
+            (plan.key, plan.monthly_jobs, plan.max_minutes, plan.max_images,
+             plan.storage_gb * BYTES_PER_GB, now_text, user_id),
+        )
+        return True
 
 
 def create_payment_attempt(
@@ -1086,13 +1140,14 @@ def activate_paystack_payment(
         db.execute(
             """INSERT INTO subscriptions
             (user_id, paystack_customer_code, payment_reference, plan, status,
-             current_period_end, created_at, updated_at)
-            VALUES (?, ?, ?, ?, 'active', ?, ?, ?)
+             current_period_end, source, created_at, updated_at)
+            VALUES (?, ?, ?, ?, 'active', ?, 'paystack', ?, ?)
             ON CONFLICT (user_id) DO UPDATE SET
               paystack_customer_code=EXCLUDED.paystack_customer_code,
               payment_reference=EXCLUDED.payment_reference,
               plan=EXCLUDED.plan, status='active',
               current_period_end=EXCLUDED.current_period_end,
+              source='paystack',
               updated_at=EXCLUDED.updated_at""",
             (attempt["user_id"], customer_code, reference, plan.key,
              period_end, now, now),

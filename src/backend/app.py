@@ -6,6 +6,7 @@ import secrets
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import quote_plus
 
 from fastapi import FastAPI, Form, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response, StreamingResponse
@@ -38,7 +39,8 @@ from .publishers import (
 from .worker import start_worker
 from .social_preview import landing_preview_png
 from .plans import (
-    CONTENT_STYLES, NICHE_OPTIONS, PAID_PLAN_KEYS, PLAN_RANK, PLANS, VOICE_OPTIONS,
+    CONTENT_STYLES, NICHE_OPTIONS, PAID_PLAN_KEYS, PLAN_RANK, PLANS,
+    VOICE_DIRECTIONS, VOICE_OPTIONS,
     prompt_starters,
 )
 from .content_policy import validate_creator_content
@@ -636,6 +638,7 @@ def storytelling_page(request: Request):
             remaining=remaining,
             storage_usage=creator_storage(user),
             voice_options=VOICE_OPTIONS,
+            voice_directions=VOICE_DIRECTIONS,
             prompt_starters=prompt_starters(str(user["creator_niche"])),
         ),
     )
@@ -757,6 +760,7 @@ def update_settings(
     content_style: str = Form("cinematic"),
     creator_goal: str = Form(""),
     narration_voice: str = Form(),
+    voice_direction: str = Form("neutral"),
     default_story_minutes: float = Form(),
     csrf: str = Form(),
 ):
@@ -770,21 +774,24 @@ def update_settings(
         return HTMLResponse("Invalid form token", status_code=400)
     if narration_voice not in VOICE_OPTIONS:
         return HTMLResponse("Choose a supported narration voice", status_code=400)
-    if creator_niche not in NICHE_OPTIONS:
-        return HTMLResponse("Choose a supported creator niche", status_code=400)
-    if content_style not in CONTENT_STYLES:
-        return HTMLResponse("Choose a supported content style", status_code=400)
+    if voice_direction not in VOICE_DIRECTIONS:
+        return HTMLResponse("Choose a supported voice direction", status_code=400)
+    if not creator_niche.strip() or len(creator_niche.strip()) > 120:
+        return HTMLResponse("Enter a story type using 120 characters or fewer", status_code=400)
+    if not content_style.strip() or len(content_style.strip()) > 120:
+        return HTMLResponse("Enter a picture style using 120 characters or fewer", status_code=400)
     if not 0.5 <= default_story_minutes <= float(user["max_minutes_per_job"]):
         return HTMLResponse("Default duration exceeds your plan limit", status_code=400)
     database.update_creator_settings(
         int(user["id"]),
         name=name.strip()[:120],
         channel_name=channel_name.strip()[:120],
-        creator_niche=creator_niche,
+        creator_niche=creator_niche.strip(),
         target_audience=target_audience.strip()[:160],
-        content_style=content_style,
+        content_style=content_style.strip(),
         creator_goal=creator_goal.strip()[:300],
         narration_voice=narration_voice,
+        voice_direction=voice_direction,
         default_story_minutes=default_story_minutes,
     )
     return RedirectResponse("/settings?saved=1", status_code=303)
@@ -943,7 +950,13 @@ def connect_youtube(request: Request):
 
 
 @app.get("/connections/youtube/callback")
-def youtube_callback(request: Request, code: str = "", state: str = ""):
+def youtube_callback(
+    request: Request,
+    code: str = "",
+    state: str = "",
+    error: str = "",
+    error_description: str = "",
+):
     redirect = creator_required(request)
     if redirect:
         return redirect
@@ -952,6 +965,19 @@ def youtube_callback(request: Request, code: str = "", state: str = ""):
         return RedirectResponse(
             "/social?connection_error=Invalid+YouTube+connection+state",
             status_code=303,
+        )
+    if error:
+        print(
+            f"YouTube authorization was denied: {error} {error_description}".strip(),
+            flush=True,
+        )
+        message = (
+            "You cancelled the YouTube connection. Please try again and allow access."
+            if error == "access_denied"
+            else "Google did not approve the YouTube connection. Please try again."
+        )
+        return RedirectResponse(
+            f"/social?connection_error={quote_plus(message)}", status_code=303
         )
     user_id = int(current_user(request)["id"])
     try:
@@ -974,10 +1000,23 @@ def youtube_callback(request: Request, code: str = "", state: str = ""):
             token_expires_at=details["token_expires_at"],
             scopes=details["scopes"],
         )
-    except RuntimeError:
+    except RuntimeError as exc:
+        print(f"YouTube connection failed for user {user_id}: {exc}", flush=True)
+        reason = str(exc).lower()
+        if "does not have a youtube channel" in reason:
+            message = "This Google account does not have a YouTube channel yet."
+        elif "has not been used in project" in reason or "api has not been used" in reason or "accessnotconfigured" in reason:
+            message = "YouTube Data API v3 is not enabled for this Google app."
+        elif "redirect_uri_mismatch" in reason:
+            message = "The YouTube callback address does not match the Google app settings."
+        elif "invalid_grant" in reason:
+            message = "The Google approval expired. Please connect YouTube again."
+        elif "offline youtube access" in reason:
+            message = "Google did not provide long-term YouTube access. Please connect again."
+        else:
+            message = "YouTube could not be connected. Please try again."
         return RedirectResponse(
-            "/social?connection_error=YouTube+could+not+be+connected",
-            status_code=303,
+            f"/social?connection_error={quote_plus(message)}", status_code=303
         )
     return RedirectResponse("/social", status_code=303)
 
@@ -1448,6 +1487,7 @@ def admin_customer_detail(request: Request, user_id: int):
             payments=database.payment_history(user_id, limit=50),
             usage=database.monthly_job_usage(user_id),
             storage_usage=customer_storage,
+            subscription=database.subscription_for_user(user_id),
         ),
     )
 
@@ -1631,6 +1671,41 @@ def admin_update_customer(
         str(user_id), f"plan={plan}; status={status}; jobs={monthly_job_limit}; minutes={max_minutes_per_job}; images={max_images_per_job}; storage_gb={storage_limit_gb}",
     )
     return RedirectResponse(f"/admin/customers/{user_id}?saved=1", status_code=303)
+
+
+@app.post("/admin/customers/{user_id}/subscription")
+def admin_grant_subscription(
+    request: Request,
+    user_id: int,
+    plan: str = Form(),
+    days: int = Form(30),
+    csrf: str = Form(),
+):
+    redirect = admin_required(request)
+    if redirect:
+        return redirect
+    verify_csrf(request, csrf)
+    if plan not in PAID_PLAN_KEYS:
+        return HTMLResponse("Choose Basic, Pro, or Studio", status_code=400)
+    if not 1 <= days <= 3650:
+        return HTMLResponse("Subscription days must be between 1 and 3,650", status_code=400)
+    reference = f"ADMIN-{user_id}-{secrets.token_hex(8)}"
+    if not database.grant_admin_subscription(
+        user_id=user_id, plan_key=plan, days=days, reference=reference
+    ):
+        return HTMLResponse("Customer not found", status_code=404)
+    administrator = current_user(request)
+    database.record_audit(
+        int(administrator["id"]), "customer.subscription_granted", "user",
+        str(user_id), f"plan={plan}; days={days}",
+    )
+    database.add_notification(
+        user_id, "billing",
+        f"An administrator added the {PLANS[plan].name} plan to your account for {days} days.",
+    )
+    return RedirectResponse(
+        f"/admin/customers/{user_id}?subscribed=1", status_code=303
+    )
 
 
 @app.post("/jobs/{job_id}/retry")
