@@ -21,7 +21,7 @@ PLANS = {
     "free": Plan(
         "free", "Free", 0, 3, 5, 8, 1,
         "Try making full videos before you pay.",
-        "People who want to test Sleep Studio.",
+        "People who want to test My Automation Studio.",
         "Make up to 3 short videos in 30 days.",
     ),
     "basic": Plan(

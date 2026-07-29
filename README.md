@@ -35,7 +35,7 @@ Passwordless authentication requires these production settings:
 ADMIN_EMAIL=admin@example.com
 ADMIN_SESSION_SECRET=replace_with_at_least_32_random_bytes
 AUTH_IP_HASH_SALT=replace_with_an_independent_random_value
-AUTH_FROM_EMAIL=Sleep Studio <login@your-verified-domain.example>
+AUTH_FROM_EMAIL=My Automation Studio <login@your-verified-domain.example>
 RESEND_API_KEY=your_resend_api_key
 GOOGLE_OAUTH_CLIENT_ID=your_google_client_id
 GOOGLE_OAUTH_CLIENT_SECRET=your_google_client_secret
@@ -110,7 +110,7 @@ the source file untouched as a recovery copy.
 
 ### Cloudflare R2 media storage
 
-Create an R2 API token restricted to the Sleep Studio bucket and configure the five
+Create an R2 API token restricted to the My Automation Studio bucket and configure the five
 `R2_*` variables above. Do not copy hardcoded credentials from another repository;
 rotate any credential that has previously been committed to source control.
 
@@ -187,7 +187,7 @@ MAX_UPLOAD_MB=2048
 
 Do not commit `.env` or share its contents.
 
-Configure the Paystack webhook URL as `https://your-host/billing/webhook`. Sleep Studio
+Configure the Paystack webhook URL as `https://your-host/billing/webhook`. My Automation Studio
 initializes NGN transactions with a unique server-side reference, verifies successful
 callbacks against Paystack, and validates webhook signatures with `PAYSTACK_SECRET_KEY`.
 Paid access lasts 30 days and is renewed manually; no Paystack plan code is required.

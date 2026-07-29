@@ -114,7 +114,7 @@ async def lifespan(app: FastAPI):
     worker.join(timeout=5)
 
 
-app = FastAPI(title="Sleep Studio", lifespan=lifespan)
+app = FastAPI(title="My Automation Studio", lifespan=lifespan)
 app.add_middleware(
     SessionMiddleware,
     secret_key=os.getenv("ADMIN_SESSION_SECRET", secrets.token_hex(32)),
@@ -122,6 +122,19 @@ app.add_middleware(
     same_site="lax",
 )
 app.mount("/static", StaticFiles(directory=WEB_DIR / "static"), name="static")
+
+
+@app.middleware("http")
+async def search_engine_headers(request: Request, call_next):
+    response = await call_next(request)
+    public_path = (
+        request.url.path in {"/", "/pricing", "/robots.txt", "/sitemap.xml", "/social-preview.png"}
+        or request.url.path.startswith("/legal/")
+        or request.url.path.startswith("/static/")
+    )
+    if not public_path or "staging." in (request.url.hostname or "").lower():
+        response.headers["X-Robots-Tag"] = "noindex, nofollow, noarchive"
+    return response
 
 
 def current_user(request: Request):
@@ -190,8 +203,23 @@ def owned_job(request: Request, job_id: int):
 
 def page_context(request: Request, section: str, **values) -> dict:
     user = current_user(request)
+    page_names = {
+        "overview": "Dashboard",
+        "storytelling": "Create Video",
+        "showcase": "Story Gallery",
+        "social": "Publish",
+        "notifications": "Updates",
+        "settings": "Account",
+        "subscription": "Subscription",
+        "jobs": "My Videos",
+        "customers": "Customers",
+        "payments": "Payments",
+        "usage": "Usage",
+        "audit": "Activity Log",
+    }
     return {
         "active_section": section,
+        "title": f"{page_names.get(section, 'Workspace')} · My Automation Studio",
         "csrf": csrf_token(request),
         "current_user": user,
         "is_admin": is_admin(user),
@@ -358,6 +386,54 @@ def landing_social_preview():
         landing_preview_png(),
         media_type="image/png",
         headers={"Cache-Control": "public, max-age=86400"},
+    )
+
+
+@app.get("/robots.txt")
+def robots_txt(request: Request):
+    base_url = public_base_url() or str(request.base_url).rstrip("/")
+    if "staging." in base_url or "nip.io" in base_url:
+        content = "User-agent: *\nDisallow: /\n"
+    else:
+        content = (
+            "User-agent: *\n"
+            "Allow: /\n"
+            "Disallow: /app\nDisallow: /login\nDisallow: /auth/\n"
+            "Disallow: /admin/\nDisallow: /jobs\nDisallow: /settings\n"
+            "Disallow: /subscription\nDisallow: /social\nDisallow: /showcase\n"
+            "Disallow: /share/\nDisallow: /billing/\nDisallow: /connections/\n"
+            f"Sitemap: {base_url}/sitemap.xml\n"
+        )
+    return Response(content, media_type="text/plain")
+
+
+@app.get("/sitemap.xml")
+def sitemap_xml(request: Request):
+    base_url = public_base_url() or str(request.base_url).rstrip("/")
+    if "staging." in base_url or "nip.io" in base_url:
+        return Response(
+            '<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"/>',
+            media_type="application/xml",
+            headers={"X-Robots-Tag": "noindex"},
+        )
+    paths = (
+        ("/", "1.0", "weekly"),
+        ("/pricing", "0.9", "weekly"),
+        ("/legal/privacy", "0.4", "monthly"),
+        ("/legal/terms", "0.4", "monthly"),
+        ("/legal/acceptable-use", "0.3", "monthly"),
+        ("/legal/copyright", "0.3", "monthly"),
+        ("/legal/billing-policy", "0.4", "monthly"),
+        ("/legal/support", "0.4", "monthly"),
+    )
+    entries = "".join(
+        f"<url><loc>{base_url}{path}</loc><changefreq>{frequency}</changefreq><priority>{priority}</priority></url>"
+        for path, priority, frequency in paths
+    )
+    return Response(
+        f'<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">{entries}</urlset>',
+        media_type="application/xml",
+        headers={"Cache-Control": "public, max-age=3600"},
     )
 
 
@@ -551,6 +627,7 @@ def landing(request: Request):
 @app.get("/pricing", response_class=HTMLResponse)
 def pricing_page(request: Request):
     user = current_user(request)
+    base_url = public_base_url() or str(request.base_url).rstrip("/")
     subscription = (
         database.subscription_for_user(int(user["id"]))
         if user and user["role"] == "creator" else None
@@ -564,6 +641,8 @@ def pricing_page(request: Request):
             "csrf": csrf_token(request) if user else "",
             "billing_configured": paystack.configured(),
             "subscription": subscription,
+            "canonical_url": f"{base_url}/pricing",
+            "preview_url": f"{base_url}/social-preview.png",
             "blocked_downgrades": {
                 key for key in PAID_PLAN_KEYS
                 if user and subscription and subscription["status"] == "active"
@@ -1579,7 +1658,7 @@ def export_account(request: Request):
     payload = json.dumps(database.user_export(int(user["id"])), indent=2, default=str)
     return Response(
         payload, media_type="application/json",
-        headers={"Content-Disposition": "attachment; filename=sleep-studio-export.json"},
+        headers={"Content-Disposition": "attachment; filename=my-automation-studio-export.json"},
     )
 
 
@@ -1606,12 +1685,12 @@ def delete_account(request: Request, confirmation: str = Form(), csrf: str = For
 
 
 LEGAL_PAGES = {
-    "privacy": ("Privacy policy", "We collect account, job, billing and usage data needed to operate Sleep Studio. Creator media is stored in Cloudflare R2 and the application exposes it through authenticated workspace routes or creator-enabled share links. We do not sell personal information."),
+    "privacy": ("Privacy policy", "We collect account, job, billing and usage data needed to operate My Automation Studio. Creator media is stored in Cloudflare R2 and the application exposes it through authenticated workspace routes or creator-enabled share links. We do not sell personal information."),
     "terms": ("Terms of service", "Creators must own or have permission to use submitted material. Accounts may not be used for unlawful, abusive or rights-infringing content. Paid access lasts 30 days and provider availability is not guaranteed."),
     "acceptable-use": ("Acceptable use", "Do not submit sexual content involving minors, instructions for serious harm, praise for mass violence, impersonation, malware, fraud, or material that violates another person's rights."),
-    "copyright": ("Copyright policy", "Sleep Studio requires original stories and does not permit copying or close paraphrasing of protected works. Rights holders may contact the operator with the work, URL and proof of authority."),
+    "copyright": ("Copyright policy", "My Automation Studio requires original stories and does not permit copying or close paraphrasing of protected works. Rights holders may contact the operator with the work, URL and proof of authority."),
     "billing-policy": ("Billing policy", "Payments are processed by Paystack in naira. Access is purchased for 30 days and renews only when the creator starts another payment. Each plan includes a storage limit for finished videos, thumbnails and uploaded media. Reaching the limit blocks new media but does not automatically delete stored files. A lower tier takes effect only after current paid access ends."),
-    "support": ("Support", "For account, billing, copyright or production help, contact the support address configured by the Sleep Studio operator."),
+    "support": ("Support", "For account, billing, copyright or production help, contact the support address configured by the My Automation Studio operator."),
 }
 
 
@@ -1623,9 +1702,11 @@ def legal_page(request: Request, page: str):
     page_content = content[1]
     if page in {"support", "copyright"} and os.getenv("SUPPORT_EMAIL", "").strip():
         page_content += f" Contact: {os.getenv('SUPPORT_EMAIL', '').strip()}."
+    base_url = public_base_url() or str(request.base_url).rstrip("/")
     return TEMPLATES.TemplateResponse(
         request, "legal.html", {"current_user": current_user(request),
-                                "page_title": content[0], "page_content": page_content},
+                                "page_title": content[0], "page_content": page_content,
+                                "canonical_url": f"{base_url}/legal/{page}"},
     )
 
 

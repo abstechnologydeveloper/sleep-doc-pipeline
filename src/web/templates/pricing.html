@@ -2,12 +2,28 @@
 <html lang="en">
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Pricing · Sleep Studio</title>
-  <script src="/static/theme.js?v=20260729-11"></script>
-  <link rel="stylesheet" href="/static/style.css?v=20260729-11">
+  <title>Pricing · My Automation Studio</title>
+  <meta name="description" content="Choose a My Automation Studio plan for AI video creation, publishing, and private media storage.">
+  <meta name="theme-color" content="#0b1020">
+  <meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1">
+  <meta property="og:site_name" content="My Automation Studio">
+  <meta property="og:title" content="Pricing · My Automation Studio">
+  <meta property="og:description" content="Compare AI video creation plans, video limits, image allowances, and private storage.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="{{ canonical_url }}">
+  <meta property="og:image" content="{{ preview_url }}">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Pricing · My Automation Studio">
+  <meta name="twitter:description" content="Compare AI video creation plans, video limits, image allowances, and private storage.">
+  <meta name="twitter:image" content="{{ preview_url }}">
+  <link rel="canonical" href="{{ canonical_url }}">
+  <link rel="icon" type="image/png" href="/static/logo.png?v=1">
+  <link rel="manifest" href="/static/site.webmanifest">
+  <script src="/static/theme.js?v=20260729-17"></script>
+  <link rel="stylesheet" href="/static/style.css?v=20260729-18">
 </head>
 <body class="marketing-body">
-<header class="marketing-nav"><a class="brand" href="/"><span class="brand-mark">S</span><span><strong>Sleep Studio</strong><small>Story video creator</small></span></a><nav><a href="/">Home</a><button class="theme-toggle inline" type="button" data-theme-toggle aria-label="Switch to dark mode">☾ Dark</button>{% if current_user %}<a class="button primary" href="/app">Workspace</a>{% else %}<a class="button primary" href="/login">Sign in</a>{% endif %}</nav></header>
+<header class="marketing-nav"><a class="brand" href="/"><img class="brand-logo brand-logo-wide" src="/static/logo.png?v=1" alt="My Automation Studio"></a><nav><a href="/">Home</a><button class="theme-toggle inline" type="button" data-theme-toggle aria-label="Switch to dark mode">☾ Dark</button>{% if current_user %}<a class="button primary" href="/app">Workspace</a>{% else %}<a class="button primary" href="/login">Sign in</a>{% endif %}</nav></header>
 <main><section class="marketing-section pricing-page">
   <div class="section-intro"><p class="eyebrow">Pricing in naira</p><h1>Create videos and keep them in your account.</h1><p>Every plan includes complete story videos and private storage. Higher plans give you more videos, longer stories, more scene images, and more storage. Paid plans last 30 days and do not renew by themselves.</p></div>
   {% if request.query_params.get('billing') == 'failed' %}<div class="alert error">Paystack did not confirm that payment. Your current plan was not changed.</div>{% endif %}
@@ -21,8 +37,8 @@
     {% elif plan.key == 'free' %}<button class="button secondary" disabled>{{ 'Current plan' if current_user.plan == 'free' else 'Included fallback' }}</button>
     {% else %}<form method="post" action="/billing/checkout/{{ plan.key }}"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="button {{ 'primary' if plan.key == 'pro' else 'secondary' }}" type="submit" {{ 'disabled' if not billing_configured or plan.key in blocked_downgrades }}>{{ 'Available after current plan' if plan.key in blocked_downgrades else ('Renew ' if current_user.plan == plan.key else 'Choose ') ~ plan.name }}</button></form>{% endif %}
   </article>{% endfor %}</div>
-  <div class="pricing-explainer"><article><strong>What uses storage?</strong><p>Finished videos, thumbnails, and uploaded videos use storage. Reusing one stored video does not count it twice.</p></article><article><strong>What happens when storage is full?</strong><p>Your files stay safe. Delete old videos or upgrade before creating or uploading another one.</p></article><article><strong>How renewal works</strong><p>Paid access lasts 30 days. Sleep Studio does not charge you again automatically; you choose when to renew.</p></article></div>
+  <div class="pricing-explainer"><article><strong>What uses storage?</strong><p>Finished videos, thumbnails, and uploaded videos use storage. Reusing one stored video does not count it twice.</p></article><article><strong>What happens when storage is full?</strong><p>Your files stay safe. Delete old videos or upgrade before creating or uploading another one.</p></article><article><strong>How renewal works</strong><p>Paid access lasts 30 days. My Automation Studio does not charge you again automatically; you choose when to renew.</p></article></div>
   {% if not billing_configured %}<p class="form-note pricing-note">Paid plans are temporarily unavailable. Please try again later.</p>{% endif %}
 </section></main>
-<footer class="marketing-footer"><span>© 2026 Sleep Studio</span><a href="/legal/billing-policy">Billing policy</a><a href="/legal/terms">Terms</a><a href="/legal/support">Support</a></footer>
+<footer class="marketing-footer"><span>© 2026 My Automation Studio</span><a href="/legal/billing-policy">Billing policy</a><a href="/legal/terms">Terms</a><a href="/legal/support">Support</a></footer>
 </body></html>
