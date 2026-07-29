@@ -244,13 +244,7 @@ def reusable_media(request: Request) -> list[dict]:
 def reusable_media_job(job) -> bool:
     if not job or not job["video_path"]:
         return False
-    try:
-        platforms = json.loads(job["platforms"])
-    except (TypeError, json.JSONDecodeError):
-        return False
-    return job["kind"] == "automatic" or (
-        job["kind"] == "manual" and not platforms
-    )
+    return job["kind"] in {"automatic", "manual"}
 
 
 def shareable_job(job) -> bool:
@@ -874,6 +868,7 @@ def settings_page(request: Request):
             voice_options=VOICE_OPTIONS,
             voice_directions=VOICE_DIRECTIONS,
             current_plan=PLANS.get(user["plan"], PLANS["free"]),
+            connectors=connector_statuses(int(user["id"])),
             niche_options=NICHE_OPTIONS,
             content_styles=CONTENT_STYLES,
             profile_complete=bool(
@@ -1095,7 +1090,7 @@ def social_page(request: Request):
     redirect = creator_required(request)
     if redirect:
         return redirect
-    return render_social_page(request, request.query_params.get("connection_error"))
+    return RedirectResponse("/settings#social-connections", status_code=303)
 
 
 @app.get("/connections/youtube")
@@ -1109,7 +1104,7 @@ def connect_youtube(request: Request):
         return RedirectResponse(youtube_authorization_url(state), status_code=303)
     except RuntimeError:
         return RedirectResponse(
-            "/social?connection_error=YouTube+connection+is+not+configured",
+            "/settings?connection_error=YouTube+connection+is+not+configured#social-connections",
             status_code=303,
         )
 
@@ -1128,7 +1123,7 @@ def youtube_callback(
     expected = str(request.session.pop("youtube_oauth_state", ""))
     if not expected or not hmac.compare_digest(expected, state):
         return RedirectResponse(
-            "/social?connection_error=Invalid+YouTube+connection+state",
+            "/settings?connection_error=Invalid+YouTube+connection+state#social-connections",
             status_code=303,
         )
     if error:
@@ -1142,7 +1137,7 @@ def youtube_callback(
             else "Google did not approve the YouTube connection. Please try again."
         )
         return RedirectResponse(
-            f"/social?connection_error={quote_plus(message)}", status_code=303
+            f"/settings?connection_error={quote_plus(message)}#social-connections", status_code=303
         )
     user_id = int(current_user(request)["id"])
     try:
@@ -1181,9 +1176,9 @@ def youtube_callback(
         else:
             message = "YouTube could not be connected. Please try again."
         return RedirectResponse(
-            f"/social?connection_error={quote_plus(message)}", status_code=303
+            f"/settings?connection_error={quote_plus(message)}#social-connections", status_code=303
         )
-    return RedirectResponse("/social", status_code=303)
+    return RedirectResponse("/settings?youtube_connected=1#social-connections", status_code=303)
 
 
 @app.post("/connections/youtube/disconnect")
@@ -1196,7 +1191,7 @@ def disconnect_youtube(request: Request, csrf: str = Form()):
     except ValueError:
         return HTMLResponse("Invalid form token", status_code=400)
     database.delete_social_connection(int(current_user(request)["id"]), "youtube")
-    return RedirectResponse("/social", status_code=303)
+    return RedirectResponse("/settings?youtube_disconnected=1#social-connections", status_code=303)
 
 
 @app.get("/jobs", response_class=HTMLResponse)
@@ -1411,35 +1406,22 @@ async def create_social_post(request: Request):
     except ValueError as exc:
         return render_social_page(request, str(exc), 400)
     owner_id = int(current_user(request)["id"])
-    if media_job["kind"] == "automatic":
-        if not database.queue_story_publication(
-            job_id=media_job_id,
-            owner_id=owner_id,
-            title=title,
-            description=description,
-            hashtags=hashtags,
-            platforms=platforms,
-            scheduled_at=scheduled_at,
-            youtube_privacy=youtube_privacy,
-        ):
-            return render_social_page(
-                request,
-                "This video is already busy. Wait for it to finish before publishing again.",
-                409,
-            )
-        job_id = media_job_id
-    else:
-        job_id = database.create_job(
-            owner_id=owner_id,
-            kind="manual",
-            title=title,
-            description=description,
-            hashtags=hashtags,
-            platforms=platforms,
-            scheduled_at=scheduled_at,
-            source_path=video_reference,
-            youtube_privacy=youtube_privacy,
+    if not database.queue_story_publication(
+        job_id=media_job_id,
+        owner_id=owner_id,
+        title=title,
+        description=description,
+        hashtags=hashtags,
+        platforms=platforms,
+        scheduled_at=scheduled_at,
+        youtube_privacy=youtube_privacy,
+    ):
+        return render_social_page(
+            request,
+            "This video is already busy. Wait for it to finish before publishing again.",
+            409,
         )
+    job_id = media_job_id
     return RedirectResponse(f"/jobs/{job_id}", status_code=303)
 
 
@@ -1511,6 +1493,10 @@ def job_detail(request: Request, job_id: int):
                 else ""
             ),
             thumbnail_ready=thumbnail_available(job),
+            youtube_connected=any(
+                item.name == "youtube" and item.configured
+                for item in connector_statuses(int(current_user(request)["id"]))
+            ) if not is_admin(current_user(request)) else False,
             shareable=shareable_job(job),
             share_url=(
                 str(request.url_for("public_share", token=job["share_token"]))
@@ -1519,6 +1505,57 @@ def job_detail(request: Request, job_id: int):
             ),
         ),
     )
+
+
+@app.post("/jobs/{job_id}/publish")
+async def publish_job(request: Request, job_id: int):
+    redirect = creator_required(request)
+    if redirect:
+        return redirect
+    form = await request.form()
+    try:
+        verify_csrf(request, str(form.get("csrf", "")))
+    except ValueError:
+        return HTMLResponse("Invalid form token", status_code=400)
+    job, _ = owned_job(request, job_id)
+    if not reusable_media_job(job):
+        return HTMLResponse("This finished video is not available.", status_code=409)
+    if not any(
+        item.name == "youtube" and item.configured
+        for item in connector_statuses(int(current_user(request)["id"]))
+    ):
+        return RedirectResponse(
+            f"/jobs/{job_id}?publish_error=Connect+YouTube+before+publishing",
+            status_code=303,
+        )
+    youtube_privacy = str(form.get("youtube_privacy", "public")).strip().lower()
+    if youtube_privacy not in {"public", "unlisted", "private"}:
+        return HTMLResponse("Choose a valid YouTube visibility.", status_code=400)
+    try:
+        scheduled_at = normalized_schedule(str(form.get("scheduled_at", "")))
+        title = str(form.get("title", "")).strip() or str(job["title"] or "")
+        description = str(form.get("description", "")).strip() or str(job["description"] or "")
+        hashtags = str(form.get("hashtags", "")).strip() or str(job["hashtags"] or "")
+        validate_creator_content(title, description, hashtags)
+    except ValueError as exc:
+        return RedirectResponse(
+            f"/jobs/{job_id}?publish_error={quote_plus(str(exc))}", status_code=303
+        )
+    if not database.queue_story_publication(
+        job_id=job_id,
+        owner_id=int(current_user(request)["id"]),
+        title=title,
+        description=description,
+        hashtags=hashtags,
+        platforms=["youtube"],
+        scheduled_at=scheduled_at,
+        youtube_privacy=youtube_privacy,
+    ):
+        return RedirectResponse(
+            f"/jobs/{job_id}?publish_error=This+video+is+already+busy",
+            status_code=303,
+        )
+    return RedirectResponse(f"/jobs/{job_id}?publish=queued", status_code=303)
 
 
 @app.post("/jobs/{job_id}/feedback")

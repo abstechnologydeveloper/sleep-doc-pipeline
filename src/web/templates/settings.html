@@ -14,5 +14,10 @@
     </form>
   </section>
 </div>
+<section class="panel" id="social-connections">
+  <div class="section-heading"><div><p class="eyebrow">Social connections</p><h2>Connect your publishing channels</h2><p>Connect a channel once, then publish each finished video from its own video page.</p></div></div>
+  {% if request.query_params.get('connection_error') %}<div class="alert error">{{ request.query_params.get('connection_error') }}</div>{% elif request.query_params.get('youtube_connected') %}<div class="alert success">YouTube was connected successfully.</div>{% elif request.query_params.get('youtube_disconnected') %}<div class="alert success">YouTube was disconnected.</div>{% endif %}
+  {% include '_connectors.html' %}
+</section>
 <section class="panel danger-zone"><div class="section-heading"><div><h2>Account data</h2><p>Download your account record or permanently delete the creator account and its stored media.</p></div><a class="button secondary" href="/account/export">Download data</a></div><form method="post" action="/account/delete" class="studio-form" onsubmit="return confirm('Permanently delete your account, jobs, and media?')"><input type="hidden" name="csrf" value="{{ csrf }}"><label>Type your email to confirm<input name="confirmation" type="email" required placeholder="{{ current_user.email }}"></label><button class="button danger" type="submit">Delete account permanently</button></form></section>
 {% endblock %}

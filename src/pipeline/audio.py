@@ -113,15 +113,31 @@ def generate_chunk_audio(
 
 def extract_pcm_audio(response: object) -> bytes:
     """Extract raw PCM samples, decoding a WAV response when necessary."""
-    try:
-        inline_data = response.candidates[0].content.parts[0].inline_data
-        audio_data = inline_data.data
-        mime_type = (inline_data.mime_type or "").lower()
-    except (AttributeError, IndexError, TypeError) as exc:
-        raise RuntimeError("Gemini returned no usable audio data.") from exc
+    audio_data = None
+    mime_type = ""
+    for candidate in getattr(response, "candidates", None) or []:
+        content = getattr(candidate, "content", None)
+        for part in getattr(content, "parts", None) or []:
+            inline_data = getattr(part, "inline_data", None)
+            data = getattr(inline_data, "data", None)
+            current_mime_type = (
+                getattr(inline_data, "mime_type", "") or ""
+            ).lower()
+            if data and (
+                not current_mime_type
+                or "audio" in current_mime_type
+                or "pcm" in current_mime_type
+                or "wav" in current_mime_type
+                or "l16" in current_mime_type
+            ):
+                audio_data = data
+                mime_type = current_mime_type
+                break
+        if audio_data:
+            break
 
     if not audio_data:
-        raise RuntimeError("Gemini returned an empty audio response.")
+        raise RuntimeError("The voice service returned no usable audio data.")
 
     if "wav" in mime_type:
         with wave.open(io.BytesIO(audio_data), "rb") as input_wf:
@@ -131,14 +147,14 @@ def extract_pcm_audio(response: object) -> bytes:
                 or input_wf.getframerate() != SAMPLE_RATE
             ):
                 raise RuntimeError(
-                    "Gemini returned WAV audio with an unexpected format."
+                    "The voice service returned WAV audio with an unexpected format."
                 )
             return input_wf.readframes(input_wf.getnframes())
 
     if not mime_type or "pcm" in mime_type or "l16" in mime_type:
         return audio_data
 
-    raise RuntimeError(f"Unsupported Gemini audio format: {mime_type}")
+    raise RuntimeError(f"Unsupported voice audio format: {mime_type}")
 
 
 def write_wave(path: Path, pcm_data: bytes) -> None:

@@ -44,6 +44,23 @@
   </aside>
 </div>
 
+{% if not is_admin and job.video_path and shareable %}
+<section class="panel" id="publish-video">
+  <div class="section-heading"><div><p class="eyebrow">Publish this video</p><h2>Send it to your channel</h2><p>Check the details below, then publish this finished video without creating another job.</p></div></div>
+  {% if request.query_params.get('publish') == 'queued' %}<div class="alert success">Your video is ready to be sent to YouTube.</div>{% elif request.query_params.get('publish_error') %}<div class="alert error">{{ request.query_params.get('publish_error') }}</div>{% endif %}
+  {% if youtube_connected %}
+  <form method="post" action="/jobs/{{ job.id }}/publish" class="studio-form">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label>Video title<input name="title" required value="{{ job.title or '' }}"></label>
+    <label>Description<textarea name="description">{{ job.description or '' }}</textarea></label>
+    <div class="field-row"><label>Hashtags <span>Optional</span><input name="hashtags" value="{{ job.hashtags or '' }}"></label><label>Publish later <span data-local-timezone>Uses your device time</span><input type="datetime-local" name="scheduled_at" data-local-schedule></label></div>
+    <label>YouTube visibility<select name="youtube_privacy"><option value="public" {{ 'selected' if job.youtube_privacy == 'public' else '' }}>Public — everyone can find and watch</option><option value="unlisted" {{ 'selected' if job.youtube_privacy == 'unlisted' else '' }}>Unlisted — anyone with the link can watch</option><option value="private" {{ 'selected' if job.youtube_privacy == 'private' else '' }}>Private — only you can watch</option></select></label>
+    <button class="button primary" type="submit">Publish to YouTube</button>
+  </form>
+  {% else %}<div class="empty-panel"><p>Connect YouTube before publishing this video.</p><a class="button secondary" href="/settings#social-connections">Set up social connections</a></div>{% endif %}
+</section>
+{% endif %}
+
 {% if not is_admin and job.status in ['completed','published','waiting_for_connections'] %}
 <section class="panel feedback-panel">
   <div class="section-heading"><div><h2>Rate this video</h2><p>Your feedback helps us improve future videos.</p></div></div>

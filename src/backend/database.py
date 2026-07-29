@@ -571,7 +571,7 @@ def queue_story_publication(
     with connect() as db:
         job = db.execute(
             """SELECT id, status FROM jobs WHERE id=? AND owner_id=?
-            AND kind='automatic' AND video_path IS NOT NULL AND video_path!=''
+            AND video_path IS NOT NULL AND video_path!=''
             FOR UPDATE""",
             (job_id, owner_id),
         ).fetchone()
