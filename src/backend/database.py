@@ -1463,6 +1463,33 @@ def claim_job():
         return job
 
 
+def recover_interrupted_jobs() -> tuple[int, int]:
+    """Recover work left active when the single worker process stopped."""
+    now = utc_now()
+    with connect() as db:
+        processing = db.execute(
+            """UPDATE jobs SET status='queued', error=NULL, updated_at=?
+            WHERE status='processing' RETURNING id""",
+            (now,),
+        ).fetchall()
+        publishing = db.execute(
+            """UPDATE jobs SET status='waiting_for_connections',
+            error='Publishing was interrupted. Review the channel before retrying to avoid a duplicate post.',
+            updated_at=? WHERE status='publishing' RETURNING id""",
+            (now,),
+        ).fetchall()
+        return len(processing), len(publishing)
+
+
+def touch_processing_job(job_id: int) -> None:
+    """Record that the worker still owns a running pipeline job."""
+    with connect() as db:
+        db.execute(
+            "UPDATE jobs SET updated_at=? WHERE id=? AND status='processing'",
+            (utc_now(), job_id),
+        )
+
+
 def update_job(job_id: int, status: str, **fields) -> None:
     allowed = {
         "topic", "title", "description", "hashtags",
