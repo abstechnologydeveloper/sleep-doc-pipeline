@@ -1,10 +1,11 @@
 (() => {
   const root = document.documentElement;
-  let saved = "light";
+  const defaultTheme = root.dataset.defaultTheme === "dark" ? "dark" : "light";
+  let saved = defaultTheme;
   try {
-    saved = localStorage.getItem("sleep-studio-theme") || "light";
+    saved = localStorage.getItem("sleep-studio-theme") || defaultTheme;
   } catch {
-    saved = "light";
+    saved = defaultTheme;
   }
   root.dataset.theme = saved === "dark" ? "dark" : "light";
 
