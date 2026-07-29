@@ -29,6 +29,7 @@ from .publishers import publish
 
 BASE_DIR = PROJECT_ROOT
 LOG_DIR = DATA_DIR / "logs"
+HEARTBEAT_SECONDS = 15
 
 
 class JobCancelled(Exception):
@@ -123,7 +124,29 @@ def run_automatic(job, log_file) -> Path:
         command,
         cwd=BASE_DIR, stdout=log_file, stderr=subprocess.STDOUT, start_new_session=True,
     )
+    started_at = time.monotonic()
+    next_heartbeat = started_at
+    runtime_limit_seconds = max(
+        30 * 60,
+        min(180 * 60, (float(job.get("minutes") or 1) * 4 + 30) * 60),
+    )
     while process.poll() is None:
+        now = time.monotonic()
+        if now >= next_heartbeat:
+            database.touch_processing_job(int(job["id"]))
+            next_heartbeat = now + HEARTBEAT_SECONDS
+        if now - started_at > runtime_limit_seconds:
+            try:
+                os.killpg(process.pid, signal.SIGTERM)
+                process.wait(timeout=10)
+            except ProcessLookupError:
+                pass
+            except subprocess.TimeoutExpired:
+                os.killpg(process.pid, signal.SIGKILL)
+                process.wait()
+            raise RuntimeError(
+                "Video creation exceeded its safe time limit. Retry the job to resume saved work."
+            )
         if database.cancellation_requested(job["id"]):
             try:
                 os.killpg(process.pid, signal.SIGTERM)
@@ -424,6 +447,13 @@ def worker_loop(stop_event: threading.Event) -> None:
 
 def start_worker() -> tuple[threading.Event, threading.Thread]:
     database.purge_cancel_requested_jobs()
+    recovered_processing, recovered_publishing = database.recover_interrupted_jobs()
+    if recovered_processing or recovered_publishing:
+        print(
+            "Recovered interrupted jobs: "
+            f"{recovered_processing} creating, {recovered_publishing} publishing.",
+            flush=True,
+        )
     stop_event = threading.Event()
     thread = threading.Thread(target=worker_loop, args=(stop_event,), daemon=True)
     thread.start()
