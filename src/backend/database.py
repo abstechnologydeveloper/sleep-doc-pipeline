@@ -1198,7 +1198,7 @@ def fail_payment_attempt(reference: str, reason: str = "") -> None:
     with connect() as db:
         db.execute(
             """UPDATE payment_attempts SET status='failed', failure_reason=?, updated_at=?
-            WHERE reference=? AND status='pending'""",
+            WHERE reference=? AND status IN ('pending', 'failed')""",
             (reason.strip()[:500], utc_now(), reference),
         )
 
@@ -1216,8 +1216,17 @@ def activate_paystack_payment(
         ).fetchone()
         if not attempt:
             raise ValueError("Unknown Paystack payment reference")
-        if currency.upper() != "NGN" or amount_kobo != int(attempt["amount_ngn"]) * 100:
-            raise ValueError("Paystack payment amount or currency does not match checkout")
+        expected_currency = "NGN"
+        confirmed_currency = currency.strip().upper()
+        expected_kobo = int(attempt["amount_ngn"]) * 100
+        if confirmed_currency != expected_currency or amount_kobo < expected_kobo:
+            confirmed_amount = amount_kobo / 100
+            raise ValueError(
+                "Payment mismatch: checkout expected at least "
+                f"{expected_currency} {int(attempt['amount_ngn']):,}, but Paystack "
+                f"confirmed {confirmed_currency or 'no currency'} "
+                f"{confirmed_amount:,.2f}."
+            )
         if attempt["status"] == "paid":
             return False
         event = db.execute(
