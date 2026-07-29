@@ -28,6 +28,10 @@ jobs:
       STUDIO_ENV_FILE: ${{ secrets.STUDIO_ENV_FILE }}
       STUDIO_DEPLOY_DIR: /home/administrator/sleep-doc-pipeline
       STUDIO_BIND_PORT: "8090"
+      STUDIO_CONTAINER_PREFIX: sleep-studio
+      PUBLIC_BASE_URL: https://myautomationstudio.com
+      R2_PREFIX: sleep-studio
+      COOKIE_SECURE: "true"
       COMPOSE_PROJECT_NAME: sleep-doc-pipeline
     steps:
       - uses: actions/checkout@v4
@@ -42,10 +46,9 @@ jobs:
           fi
           required_keys=(
             GEMINI_API_KEY CLOUDFLARE_ACCOUNT_ID CLOUDFLARE_API_TOKEN
-            ADMIN_SESSION_SECRET PUBLIC_BASE_URL POSTGRES_PASSWORD DATABASE_URL
+            ADMIN_SESSION_SECRET POSTGRES_PASSWORD DATABASE_URL
             ADMIN_EMAIL AUTH_IP_HASH_SALT OAUTH_TOKEN_ENCRYPTION_KEY
             R2_ACCOUNT_ID R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY R2_BUCKET
-            R2_PREFIX STUDIO_CONTAINER_PREFIX STUDIO_BIND_PORT
             GOOGLE_OAUTH_CLIENT_ID GOOGLE_OAUTH_CLIENT_SECRET
           )
           for key in "${required_keys[@]}"; do
@@ -56,22 +59,6 @@ jobs:
           done
           if grep -Eq '^\+[^=]+=' <<< "${STUDIO_ENV_FILE}"; then
             echo "STUDIO_ENV_FILE contains a key beginning with '+'. Remove the leading '+'." >&2
-            exit 1
-          fi
-          if ! grep -Fxq 'PUBLIC_BASE_URL=https://myautomationstudio.com' <<< "${STUDIO_ENV_FILE}"; then
-            echo "Production PUBLIC_BASE_URL must be https://myautomationstudio.com." >&2
-            exit 1
-          fi
-          if ! grep -Fxq 'R2_PREFIX=sleep-studio' <<< "${STUDIO_ENV_FILE}"; then
-            echo "Production R2_PREFIX must be sleep-studio." >&2
-            exit 1
-          fi
-          if ! grep -Fxq 'STUDIO_CONTAINER_PREFIX=sleep-studio' <<< "${STUDIO_ENV_FILE}"; then
-            echo "Production STUDIO_CONTAINER_PREFIX must be sleep-studio." >&2
-            exit 1
-          fi
-          if ! grep -Fxq 'STUDIO_BIND_PORT=8090' <<< "${STUDIO_ENV_FILE}"; then
-            echo "Production STUDIO_BIND_PORT must be 8090." >&2
             exit 1
           fi
       - name: Deploy and clean old Docker artifacts
