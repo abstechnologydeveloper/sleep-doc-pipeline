@@ -1425,26 +1425,18 @@ def retry_job(job_id: int) -> None:
 
 
 def request_job_deletion(job_id: int) -> None:
+    """Remove a job immediately; a running worker treats a missing row as cancellation."""
     with connect() as db:
-        job = db.execute("SELECT status FROM jobs WHERE id = ?", (job_id,)).fetchone()
-        if not job:
-            return
-        if job["status"] in {"processing", "publishing", "cancel_requested"}:
-            db.execute(
-                "UPDATE jobs SET status='cancel_requested', updated_at=? WHERE id=?",
-                (utc_now(), job_id),
-            )
-        else:
-            db.execute(
-                """UPDATE story_usage SET outcome='released', updated_at=?
-                WHERE job_id=? AND outcome='pending'""",
-                (utc_now(), job_id),
-            )
-            db.execute("DELETE FROM jobs WHERE id = ?", (job_id,))
+        db.execute(
+            """UPDATE story_usage SET outcome='released', updated_at=?
+            WHERE job_id=? AND outcome='pending'""",
+            (utc_now(), job_id),
+        )
+        db.execute("DELETE FROM jobs WHERE id = ?", (job_id,))
 
 
 def request_jobs_deletion(job_ids: list[int]) -> None:
-    """Delete idle jobs and request cancellation for running jobs."""
+    """Remove selected jobs immediately, including jobs currently being cancelled."""
     unique_ids = sorted(set(job_ids))
     if not unique_ids:
         return
@@ -1456,17 +1448,20 @@ def request_jobs_deletion(job_ids: list[int]) -> None:
             WHERE job_id IN ({placeholders}) AND outcome='pending'""",
             (now, *unique_ids),
         )
+        db.execute(f"DELETE FROM jobs WHERE id IN ({placeholders})", unique_ids)
+
+
+def purge_cancel_requested_jobs() -> None:
+    """Remove cancellation rows orphaned by a previous worker process."""
+    now = utc_now()
+    with connect() as db:
         db.execute(
-            f"""UPDATE jobs SET status='cancel_requested', updated_at=?
-            WHERE id IN ({placeholders})
-            AND status IN ('processing', 'publishing', 'cancel_requested')""",
-            (now, *unique_ids),
+            """UPDATE story_usage SET outcome='released', updated_at=?
+            WHERE job_id IN (SELECT id FROM jobs WHERE status='cancel_requested')
+            AND outcome='pending'""",
+            (now,),
         )
-        db.execute(
-            f"""DELETE FROM jobs WHERE id IN ({placeholders})
-            AND status NOT IN ('processing', 'publishing', 'cancel_requested')""",
-            unique_ids,
-        )
+        db.execute("DELETE FROM jobs WHERE status='cancel_requested'")
 
 
 def cancellation_requested(job_id: int) -> bool:

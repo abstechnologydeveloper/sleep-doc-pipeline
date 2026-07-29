@@ -4,6 +4,7 @@
 import argparse
 import json
 import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from urllib import error, request
 
@@ -150,25 +151,50 @@ def main() -> None:
     output_dir = SOUNDS_DIR / script_path.stem
     output_dir.mkdir(parents=True, exist_ok=True)
     completed = []
+    pending = []
     for index, cue in enumerate(cues, start=1):
         filename = f"cue_{index:03d}.mp3"
         output_path = output_dir / filename
         if output_path.is_file() and output_path.stat().st_size > 0:
             print(f"  Sound {index}/{len(cues)} already done, skipping.")
+            completed.append((index, {**cue, "filename": filename}))
         else:
-            print(f"  Generating sound {index}/{len(cues)}: {cue['prompt'][:70]}...")
-            temporary_path = output_path.with_suffix(".generating.mp3")
-            try:
-                temporary_path.write_bytes(generate_sound(api_key, cue))
-                temporary_path.replace(output_path)
-            except (OSError, RuntimeError) as exc:
-                temporary_path.unlink(missing_ok=True)
-                print(f"  Warning: sound {index} was skipped ({exc})")
-                continue
-        completed.append({**cue, "filename": filename})
+            pending.append((index, cue, filename, output_path))
+
+    def generate_pending_sound(item: tuple) -> tuple[int, dict] | None:
+        index, cue, filename, output_path = item
+        print(f"  Generating sound {index}/{len(cues)}: {cue['prompt'][:70]}...")
+        temporary_path = output_path.with_suffix(".generating.mp3")
+        try:
+            temporary_path.write_bytes(generate_sound(api_key, cue))
+            temporary_path.replace(output_path)
+            return index, {**cue, "filename": filename}
+        except (OSError, RuntimeError) as exc:
+            temporary_path.unlink(missing_ok=True)
+            print(f"  Warning: sound {index} was skipped ({exc})")
+            return None
+
+    try:
+        requested_workers = int(os.getenv("SOUND_GENERATION_WORKERS", "3"))
+    except ValueError:
+        requested_workers = 3
+    worker_count = min(max(1, requested_workers), 4, len(pending))
+    if pending:
+        print(
+            f"Generating {len(pending)} sound effects with "
+            f"{worker_count} concurrent workers."
+        )
+        with ThreadPoolExecutor(max_workers=worker_count) as executor:
+            futures = [executor.submit(generate_pending_sound, item) for item in pending]
+            for future in as_completed(futures):
+                result = future.result()
+                if result:
+                    completed.append(result)
+
+    completed_cues = [item for _, item in sorted(completed, key=lambda row: row[0])]
 
     (output_dir / MANIFEST_FILENAME).write_text(
-        json.dumps({"cues": completed}, indent=2), encoding="utf-8"
+        json.dumps({"cues": completed_cues}, indent=2), encoding="utf-8"
     )
     print(f"Sound effects saved to {output_dir}")
 

@@ -766,6 +766,8 @@ def render_video(
                 "[audio]",
                 "-c:v",
                 "libx264",
+                "-preset",
+                "veryfast",
                 "-profile:v",
                 "main",
                 "-level:v",

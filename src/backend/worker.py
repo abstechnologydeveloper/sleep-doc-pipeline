@@ -104,6 +104,18 @@ def run_automatic(job, log_file) -> Path:
             except subprocess.TimeoutExpired:
                 os.killpg(process.pid, signal.SIGKILL)
                 process.wait()
+            cancelled_script = script_path
+            if cancelled_script is None:
+                new_scripts = [
+                    path for path in SCRIPTS_DIR.glob("*.txt")
+                    if path not in existing_scripts
+                ]
+                if new_scripts:
+                    cancelled_script = max(
+                        new_scripts, key=lambda path: path.stat().st_mtime_ns
+                    )
+            if cancelled_script:
+                cleanup_cancelled_pipeline(cancelled_script)
             raise JobCancelled
         time.sleep(1)
     if not script_path:
@@ -133,6 +145,23 @@ def cleanup_generated_media(video_path: Path) -> None:
     video_path.unlink(missing_ok=True)
     (THUMBNAILS_DIR / f"{stem}.jpg").unlink(missing_ok=True)
     (AUDIO_DIR / f"{stem}.wav").unlink(missing_ok=True)
+    shutil.rmtree(IMAGES_DIR / stem, ignore_errors=True)
+    shutil.rmtree(SOUNDS_DIR / stem, ignore_errors=True)
+
+
+def cleanup_cancelled_pipeline(script_path: Path) -> None:
+    """Remove resumable working files after the creator deletes the job."""
+    stem = script_path.stem
+    script_path.unlink(missing_ok=True)
+    for path in (
+        AUDIO_DIR / f"{stem}.wav",
+        AUDIO_DIR / f"{stem}.timings.json",
+        VIDEOS_DIR / f"{stem}.mp4",
+        VIDEOS_DIR / f"{stem}.rendering.mp4",
+        THUMBNAILS_DIR / f"{stem}.jpg",
+    ):
+        path.unlink(missing_ok=True)
+    shutil.rmtree(AUDIO_DIR / f"{stem}_chunks", ignore_errors=True)
     shutil.rmtree(IMAGES_DIR / stem, ignore_errors=True)
     shutil.rmtree(SOUNDS_DIR / stem, ignore_errors=True)
 
@@ -321,6 +350,7 @@ def process_job(job) -> None:
                         database.remove_media_asset(stored_reference)
                     except RuntimeError:
                         pass
+        log_path.unlink(missing_ok=True)
     except (OSError, subprocess.CalledProcessError, RuntimeError) as exc:
         database.update_job(job["id"], "failed", error=str(exc))
         storage_full = str(exc).startswith("Storage is full.")
@@ -358,6 +388,7 @@ def worker_loop(stop_event: threading.Event) -> None:
 
 
 def start_worker() -> tuple[threading.Event, threading.Thread]:
+    database.purge_cancel_requested_jobs()
     stop_event = threading.Event()
     thread = threading.Thread(target=worker_loop, args=(stop_event,), daemon=True)
     thread.start()

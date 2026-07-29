@@ -17,6 +17,7 @@ import os
 import re
 import hashlib
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from urllib import error, request
 
@@ -739,6 +740,7 @@ def main() -> None:
         f"{distinct_count} distinct images."
     )
 
+    pending_scenes = []
     for i, scene in enumerate(scene_entries, start=1):
         image_stem = scene["id"]
         reused_scene_id = scene.get("reuse_scene_id")
@@ -767,15 +769,39 @@ def main() -> None:
         if existing_image:
             print(f"  Scene {i}/{len(scene_entries)} already done, skipping.")
             continue
+        pending_scenes.append((i, scene))
 
+    def generate_pending_scene(index: int, scene: dict) -> int:
+        image_stem = scene["id"]
         prompt = scene["prompt"]
-        print(f"  Generating scene {i}/{len(scene_entries)}: {prompt[:70]}...")
-
-        image_data, suffix = generate_image(account_id, api_token, prompt, image_model)
+        print(f"  Generating scene {index}/{len(scene_entries)}: {prompt[:70]}...")
+        image_data, suffix = generate_image(
+            account_id, api_token, prompt, image_model
+        )
         image_path = image_dir / f"{image_stem}{suffix}"
         temporary_path = image_dir / f"{image_stem}.generating{suffix}"
         temporary_path.write_bytes(image_data)
         temporary_path.replace(image_path)
+        return index
+
+    try:
+        requested_workers = int(os.getenv("IMAGE_GENERATION_WORKERS", "3"))
+    except ValueError:
+        requested_workers = 3
+    worker_count = min(max(1, requested_workers), 4, len(pending_scenes))
+    if pending_scenes:
+        print(
+            f"Generating {len(pending_scenes)} new images with "
+            f"{worker_count} concurrent workers."
+        )
+        with ThreadPoolExecutor(max_workers=worker_count) as executor:
+            futures = {
+                executor.submit(generate_pending_scene, index, scene): index
+                for index, scene in pending_scenes
+            }
+            for future in as_completed(futures):
+                completed_index = future.result()
+                print(f"  Scene {completed_index}/{len(scene_entries)} saved.")
 
     existing_thumbnail = next(
         (
