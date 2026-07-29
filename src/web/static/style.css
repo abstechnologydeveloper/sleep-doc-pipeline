@@ -87,17 +87,20 @@ small { display: block; color: var(--muted); line-height: 1.35; }
 }
 .nav-item:hover { color: var(--text); background: var(--hover); }
 .nav-item.active { color: var(--text); background: var(--blue-soft); }
-.nav-icon { display: grid; place-items: center; width: 24px; height: 24px; border: 1px solid #3a4150; border-radius: 6px; font-size: 10px; font-weight: 800; }
-.nav-item.active .nav-icon { border-color: #7188e9; background: #354788; }
+.nav-icon { display: grid; place-items: center; width: 24px; height: 24px; color: var(--muted); }
+.nav-icon svg { width: 19px; height: 19px; }
+.nav-item.active .nav-icon { color: var(--blue); }
 .nav-tag { padding: 2px 6px; border-radius: 999px; background: #2a2e38; font-size: 9px; text-transform: uppercase; }
 .sidebar-footer { margin-top: auto; padding: 14px 8px 2px; border-top: 1px solid var(--border-soft); }
+.sidebar-bottom-nav { margin: -5px 0 14px; padding-bottom: 12px; border-bottom: 1px solid var(--border-soft); }
+.sidebar-bottom-nav .nav-item { padding-inline: 2px; }
 .admin-identity { display: flex; align-items: center; gap: 9px; margin-bottom: 10px; }
 .admin-identity small { font-size: 11px; }
 .text-button { padding: 4px 0; border: 0; background: transparent; color: var(--muted); cursor: pointer; }
 .text-button:hover { color: #fff; }
 
 .workspace { min-height: 100vh; margin-left: 240px; }
-.workspace main { width: min(100%, 1440px); margin: 0 auto; padding: 32px 34px 70px; }
+.workspace main { width: 100%; margin: 0; padding: 32px 34px 70px; }
 .mobile-header, .sidebar-overlay { display: none; }
 .page-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; margin-bottom: 24px; }
 .page-heading > div { max-width: 760px; }
@@ -110,6 +113,8 @@ small { display: block; color: var(--muted); line-height: 1.35; }
   border: 1px solid var(--border); border-radius: 11px; background: var(--panel);
 }
 .content-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; align-items: start; }
+.account-layout { width: 100%; }
+.account-layout > .panel { width: 100%; }
 .span-two { grid-column: span 2; }
 .overview-grid { grid-template-columns: minmax(0, 2fr) minmax(270px, .8fr); }
 .form-layout { grid-template-columns: minmax(0, 1.8fr) minmax(270px, .8fr); }
@@ -401,6 +406,14 @@ html[data-theme="dark"] .plan-badge { color: #b9c5ff; }
 .plan-price strong { font-size: 28px; }
 .plan-price span { color: var(--muted); font-size: 11px; }
 .plan-price.compact { margin: 16px 0 22px; }
+.subscription-summary { width: 100%; }
+.subscription-title { display: flex; justify-content: space-between; align-items: flex-start; gap: 24px; margin-bottom: 22px; }
+.subscription-title > div:first-child { max-width: 650px; }
+.subscription-title .plan-price { flex: 0 0 auto; }
+.subscription-limits { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 24px; }
+.subscription-limits article { padding: 16px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel-soft); }
+.subscription-limits span, .subscription-limits small { display: block; color: var(--muted); font-size: 11px; }
+.subscription-limits strong { display: block; margin: 7px 0 3px; font-size: 22px; }
 .plan-fit { margin: 15px 0 0; padding: 10px; border-radius: 9px; background: var(--panel-soft); font-size: 11px; }
 .plan-fit strong { display: block; margin-bottom: 4px; color: var(--text); }
 .pricing-explainer { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 24px; }
@@ -456,6 +469,7 @@ html[data-theme="dark"] .cta-panel { border-color: #3c4770; background: radial-g
   .testimonial-grid { grid-template-columns: 1fr 1fr; }
   .limit-form { min-width: 390px; }
   .pricing-explainer { grid-template-columns: 1fr; }
+  .subscription-limits { grid-template-columns: 1fr 1fr; }
   .job-table, .job-table tbody { display: block; }
   .job-table thead { display: none; }
   .job-table tr { display: grid; grid-template-columns: 28px 48px minmax(0, 1fr) auto; align-items: center; gap: 8px; margin-bottom: 10px; padding: 12px; border: 1px solid var(--border); border-radius: 9px; background: var(--panel); }
@@ -485,4 +499,6 @@ html[data-theme="dark"] .cta-panel { border-color: #3c4770; background: radial-g
   .feature-grid, .check-list { grid-template-columns: 1fr; }
   .automation-flow, .automation-notes { grid-template-columns: 1fr; }
   .pricing-grid, .testimonial-grid { grid-template-columns: 1fr; }
+  .subscription-title { display: grid; }
+  .subscription-limits { grid-template-columns: 1fr; }
 }

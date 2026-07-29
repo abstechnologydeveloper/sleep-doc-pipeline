@@ -720,13 +720,29 @@ def settings_page(request: Request):
             request,
             "settings",
             voice_options=VOICE_OPTIONS,
-            subscription=subscription,
-            payments=database.payment_history(int(user["id"]), limit=20),
             current_plan=PLANS.get(user["plan"], PLANS["free"]),
-            storage_usage=creator_storage(user),
-            billing_configured=paystack.configured(),
             niche_options=NICHE_OPTIONS,
             content_styles=CONTENT_STYLES,
+        ),
+    )
+
+
+@app.get("/subscription", response_class=HTMLResponse)
+def subscription_page(request: Request):
+    redirect = creator_required(request)
+    if redirect:
+        return redirect
+    user = current_user(request)
+    return TEMPLATES.TemplateResponse(
+        request,
+        "subscription.html",
+        page_context(
+            request,
+            "subscription",
+            current_plan=PLANS.get(user["plan"], PLANS["free"]),
+            subscription=database.subscription_for_user(int(user["id"])),
+            payments=database.payment_history(int(user["id"]), limit=20),
+            storage_usage=creator_storage(user),
         ),
     )
 
@@ -851,8 +867,8 @@ def paystack_callback(request: Request, reference: str = ""):
                 f"Your {str(metadata.get('plan') or 'paid').title()} plan payment was confirmed.",
             )
     except (RuntimeError, ValueError):
-        return RedirectResponse("/pricing?billing=failed", status_code=303)
-    return RedirectResponse("/settings?billing=success", status_code=303)
+        return RedirectResponse("/subscription?billing=failed", status_code=303)
+    return RedirectResponse("/subscription?billing=success", status_code=303)
 
 
 @app.post("/billing/webhook")

@@ -1,0 +1,14 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="page-heading"><div><p class="eyebrow">Subscription</p><h1>Your plan and storage</h1><p>See what your plan includes, check your usage, or choose another plan.</p></div><a class="button primary" href="/pricing">See all plans</a></div>
+{% if request.query_params.get('billing') == 'success' %}<div class="alert success">Your payment was confirmed. Your plan is now active.</div>{% elif request.query_params.get('billing') == 'failed' %}<div class="alert error">Your payment was not confirmed. Your plan did not change.</div>{% endif %}
+
+<section class="panel subscription-summary">
+  <div class="subscription-title"><div><p class="eyebrow">Current plan</p><h2>{{ current_plan.name }}</h2><p>{{ current_plan.description }}</p></div><div class="plan-price"><strong>₦{{ '{:,}'.format(current_plan.monthly_price_ngn) }}</strong><span>{{ '/ 30 days' if current_plan.monthly_price_ngn else 'free plan' }}</span></div></div>
+  <div class="subscription-limits"><article><span>Videos</span><strong>{{ current_plan.monthly_jobs }}</strong><small>every 30 days</small></article><article><span>Video length</span><strong>{{ current_plan.max_minutes }} min</strong><small>for each video</small></article><article><span>New pictures</span><strong>{{ current_plan.max_images }}</strong><small>for each video</small></article><article><span>Storage</span><strong>{{ current_plan.storage_gb }} GB</strong><small>private space</small></article></div>
+  <div class="storage-strip"><div><span>Storage used</span><strong>{{ storage_usage.used|storage_size }} of {{ storage_usage.limit|storage_size }}</strong></div><div class="storage-meter" role="progressbar" aria-valuenow="{{ storage_usage.percent }}" aria-valuemin="0" aria-valuemax="100"><i style="width: {{ storage_usage.percent }}%"></i></div><small>{{ storage_usage.remaining|storage_size }} available</small></div>
+  {% if subscription %}<p class="form-note">Plan status: {{ subscription.status|replace('_', ' ')|title }}{% if subscription.current_period_end %}. Your paid access ends on {{ subscription.current_period_end[:10] }} unless you renew it.{% endif %}</p>{% endif %}
+</section>
+
+<section class="panel"><div class="section-heading"><div><h2>Payments</h2><p>Your recent plan payments.</p></div></div><div class="table-wrap"><table><thead><tr><th>Date</th><th>Plan</th><th>Amount</th><th>Result</th></tr></thead><tbody>{% for payment in payments %}<tr><td>{{ payment.created_at[:10] }}</td><td>{{ payment.plan|title }}</td><td>₦{{ '{:,}'.format(payment.amount_ngn) }}</td><td><span class="status">{{ payment.status|title }}</span></td></tr>{% else %}<tr><td colspan="4" class="empty-state">No payments yet.</td></tr>{% endfor %}</tbody></table></div></section>
+{% endblock %}

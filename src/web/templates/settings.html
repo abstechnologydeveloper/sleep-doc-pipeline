@@ -1,9 +1,8 @@
 {% extends 'base.html' %}
 {% block content %}
-<div class="page-heading"><div><p class="eyebrow">Your account</p><h1>Profile and plan</h1><p>Save the choices you want Sleep Studio to use for new videos.</p></div><a class="button secondary" href="/pricing">See plans</a></div>
+<div class="page-heading"><div><p class="eyebrow">Your account</p><h1>Profile and video choices</h1><p>Choose how Sleep Studio should make your videos.</p></div></div>
 {% if request.query_params.get('saved') %}<div class="alert success">Your creator settings were saved.</div>{% endif %}
-{% if request.query_params.get('billing') == 'success' %}<div class="alert success">Paystack confirmed your payment and your plan is active.</div>{% endif %}
-<div class="content-grid form-layout">
+<div class="account-layout">
   <section class="panel"><div class="section-heading"><div><h2>Your video style</h2><p>These choices help us suggest better ideas and create videos for the right viewers.</p></div></div>
     <form class="studio-form" method="post" action="/settings"><input type="hidden" name="csrf" value="{{ csrf }}">
       <div class="field-row"><label>Your name<input name="name" maxlength="120" value="{{ current_user.name }}" placeholder="Your name"></label><label>Channel name<input name="channel_name" maxlength="120" value="{{ current_user.channel_name }}" placeholder="For example: Midnight Story Room"></label></div>
@@ -15,8 +14,6 @@
       <button class="button primary" type="submit">Save my choices</button>
     </form>
   </section>
-  <aside class="panel"><p class="eyebrow">Current plan</p><h2>{{ current_plan.name }}</h2><div class="plan-price compact"><strong>₦{{ '{:,}'.format(current_plan.monthly_price_ngn) }}</strong><span>/ 30 days</span></div><ul class="readiness-list"><li><span></span>{{ current_plan.monthly_jobs }} stories per month</li><li><span></span>{{ current_plan.max_minutes }} minutes per story</li><li><span></span>{{ current_plan.max_images }} images per story</li><li><span></span>{{ current_plan.storage_gb }} GB video storage</li></ul><div class="storage-strip compact"><div><span>Storage used</span><strong>{{ storage_usage.used|storage_size }} of {{ storage_usage.limit|storage_size }}</strong></div><div class="storage-meter" role="progressbar" aria-valuenow="{{ storage_usage.percent }}" aria-valuemin="0" aria-valuemax="100"><i style="width: {{ storage_usage.percent }}%"></i></div></div>{% if subscription %}<p class="form-note">Payment status: {{ subscription.status|replace('_', ' ')|title }}{% if subscription.current_period_end %}. Access ends {{ subscription.current_period_end[:10] }} unless renewed.{% endif %}</p>{% endif %}<a class="button secondary action-row" href="/pricing">{{ 'Renew or change plan' if subscription else 'Upgrade plan' }}</a></aside>
 </div>
-<section class="panel"><div class="section-heading"><div><h2>Payments</h2><p>Your recent plan payments.</p></div></div><div class="table-wrap"><table><thead><tr><th>Date</th><th>Plan</th><th>Amount</th><th>Result</th></tr></thead><tbody>{% for payment in payments %}<tr><td>{{ payment.created_at[:10] }}</td><td>{{ payment.plan|title }}</td><td>₦{{ '{:,}'.format(payment.amount_ngn) }}</td><td><span class="status">{{ payment.status|title }}</span></td></tr>{% else %}<tr><td colspan="4" class="muted">No payments yet.</td></tr>{% endfor %}</tbody></table></div></section>
 <section class="panel danger-zone"><div class="section-heading"><div><h2>Account data</h2><p>Download your account record or permanently delete the creator account and its stored media.</p></div><a class="button secondary" href="/account/export">Download data</a></div><form method="post" action="/account/delete" class="studio-form" onsubmit="return confirm('Permanently delete your account, jobs, and media?')"><input type="hidden" name="csrf" value="{{ csrf }}"><label>Type your email to confirm<input name="confirmation" type="email" required placeholder="{{ current_user.email }}"></label><button class="button danger" type="submit">Delete account permanently</button></form></section>
 {% endblock %}
