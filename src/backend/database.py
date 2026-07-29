@@ -1219,10 +1219,10 @@ def activate_paystack_payment(
         expected_currency = "NGN"
         confirmed_currency = currency.strip().upper()
         expected_kobo = int(attempt["amount_ngn"]) * 100
-        if confirmed_currency != expected_currency or amount_kobo != expected_kobo:
+        if confirmed_currency != expected_currency or amount_kobo < expected_kobo:
             confirmed_amount = amount_kobo / 100
             raise ValueError(
-                "Payment mismatch: checkout expected "
+                "Payment mismatch: checkout expected at least "
                 f"{expected_currency} {int(attempt['amount_ngn']):,}, but Paystack "
                 f"confirmed {confirmed_currency or 'no currency'} "
                 f"{confirmed_amount:,.2f}."
