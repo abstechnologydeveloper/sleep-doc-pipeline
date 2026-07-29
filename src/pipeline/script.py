@@ -26,19 +26,23 @@ HEADING_PATTERN = re.compile(
 
 
 def build_system_prompt(
-    min_words: int, max_words: int, niche: str = "", audience: str = ""
+    min_words: int, max_words: int, niche: str = "", audience: str = "",
+    creator_goal: str = "",
 ) -> str:
     creator_context = ""
-    if niche or audience:
+    if niche or audience or creator_goal:
         creator_context = (
             f"\nCreator context: primary niche is {niche or 'general storytelling'}; "
             f"target audience is {audience or 'a general storytelling audience'}. "
-            "Use this only to choose suitable language, stakes, humor, and pacing.\n"
+            f"Their goal is {creator_goal or 'make an enjoyable original video'}. "
+            "Use this to choose suitable language, stakes, humor, pacing, and emotional payoff.\n"
         )
-    return f"""You write narration scripts for a sleep and storytelling YouTube channel.
+    return f"""You write narration scripts for a storytelling video channel.
 Create one continuous narrative arc with no chapters, chapter headings, numbered sections,
-repeated templates, or other structural labels. Use calm, low-stimulation pacing suitable
-for a listener who is falling asleep. The finished script must be {min_words:,} to
+repeated templates, or other structural labels. Match the energy to the creator's niche,
+audience, and goal: gentle for sleep, lively and playful for children, mature and tense for
+mystery or horror, clear and engaging for history or science, and warm when the topic asks
+for it. Do not force every story into a bedtime mood. The finished script must be {min_words:,} to
 {max_words:,} words. Do not copy, quote, or closely paraphrase any real source material.
 Use original language and follow these writing rules:
 - Write in plain, everyday English that is easy to understand when heard once.
@@ -56,6 +60,13 @@ Use original language and follow these writing rules:
   relationship shift, or difficult choice instead of repeating similar scenes.
 - Keep names, relationships, knowledge, motivations, locations, props, time, weather, travel,
   and physical details consistent unless the story clearly changes them.
+- When the topic does not provide a character name, choose a fresh name that fits the setting,
+  culture, time period, and audience. Never default to Ella, Luna, Lily, Maya, Leo, Oliver,
+  Finn, or Pip unless the topic provides that name. Avoid stock AI motifs such as glowing
+  forests, whispering lights, fallen stars, magical clocks, and forgotten towns unless asked.
+- Make the character's occupation, age, personality, goal, flaw, relationships, and choices
+  specific to this premise. Do not recycle the same lonely traveler, child, librarian, baker,
+  lighthouse keeper, or mysterious stranger structure when the topic does not require it.
 - Pay off important clues, promises, objects, rules, and relationships. The climax should
   result from the central character's accumulated choices, learning, kindness, or courage.
 - Resolve the central story question and show the emotional change before a gentle ending.
@@ -66,7 +77,7 @@ Use original language and follow these writing rules:
   playful and lively; an adult story should remain mature without becoming stiff or childish.
 - Show what happens instead of lecturing, explaining a moral, or repeatedly describing the
   atmosphere. Avoid filler, cliches, recaps, and repeated ideas.
-- Keep danger age-appropriate and avoid sudden disturbing detail because this is sleep content.
+- Keep danger appropriate for the stated audience and avoid graphic or exploitative detail.
 - For historical, cultural, scientific, documentary, or folklore topics, do not invent facts
   and present them as verified. Make original fictionalization clear through the narrative.
 Vary sentence rhythm so the prose does not sound repetitive or like AI filler. Return only
@@ -181,12 +192,15 @@ def generate_script(
     verbose: bool = True,
     niche: str = "",
     audience: str = "",
+    creator_goal: str = "",
 ) -> str:
     draft = ""
     history: list[types.Content] = []
 
     config = types.GenerateContentConfig(
-        system_instruction=build_system_prompt(min_words, max_words, niche, audience),
+        system_instruction=build_system_prompt(
+            min_words, max_words, niche, audience, creator_goal
+        ),
         max_output_tokens=8_000,
         temperature=0.8,
     )
@@ -260,6 +274,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--niche", default="", help="Creator niche guidance")
     parser.add_argument("--audience", default="", help="Target audience guidance")
+    parser.add_argument("--goal", default="", help="Creator outcome and publishing goal")
     args = parser.parse_args()
     if args.minutes is not None and args.minutes <= 0:
         parser.error("--minutes must be greater than zero")
@@ -329,6 +344,7 @@ def main() -> None:
         max_words,
         niche=args.niche,
         audience=args.audience,
+        creator_goal=args.goal,
     )
 
     output_dir = SCRIPTS_DIR

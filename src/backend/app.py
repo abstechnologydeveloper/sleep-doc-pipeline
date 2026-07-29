@@ -14,7 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
-from project_paths import THUMBNAILS_DIR
+from project_paths import DATA_DIR, THUMBNAILS_DIR
 
 from . import database
 from . import storage
@@ -210,7 +210,7 @@ def page_context(request: Request, section: str, **values) -> dict:
         "showcase": "Story Gallery",
         "social": "Publish",
         "notifications": "Updates",
-        "settings": "Account",
+        "settings": "Video Recipe",
         "subscription": "Subscription",
         "jobs": "My Videos",
         "customers": "Customers",
@@ -260,6 +260,43 @@ def shareable_job(job) -> bool:
         and job["video_path"]
         and storage.available(job["video_path"])
     )
+
+
+def creator_job_error(error: str | None) -> str:
+    """Turn internal pipeline errors into useful messages without exposing server details."""
+    detail = str(error or "").lower()
+    if "storage is full" in detail:
+        return "Your storage is full. Delete an old video or choose a larger plan, then retry."
+    if "daily allocation" in detail or "daily limit" in detail or "quota" in detail:
+        return "An AI service reached its usage limit. Please retry later."
+    if "elevenlabs" in detail or "sound request" in detail:
+        return "A sound effect could not be created. Please retry the video."
+    if "audio" in detail or "voice" in detail or "tts" in detail:
+        return "The narration could not be completed. Please retry the video."
+    if "image" in detail or "cloudflare" in detail or "storyboard" in detail:
+        return "One or more story pictures could not be completed. Please retry the video."
+    if "ffmpeg" in detail or "assembling" in detail or "render" in detail:
+        return "The final video could not be assembled. Your saved work can be retried."
+    if "incomplete narration" in detail or "quality check" in detail:
+        return "The story was incomplete, so it was stopped instead of creating a poor video. Please retry."
+    if "timed out" in detail or "timeout" in detail or "temporarily unavailable" in detail:
+        return "A video service was temporarily unavailable. Please retry later."
+    return "The video could not be completed. Please retry it. If it fails again, contact support with the video number."
+
+
+def job_log_excerpt(job) -> str:
+    """Read only the end of a worker-owned log path for administrator diagnosis."""
+    if not job or not job["log_path"]:
+        return ""
+    log_root = (DATA_DIR / "logs").resolve()
+    try:
+        log_path = Path(str(job["log_path"])).resolve()
+        if not log_path.is_relative_to(log_root) or not log_path.is_file():
+            return ""
+        lines = log_path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return ""
+    return "\n".join(lines[-40:])[-6000:]
 
 
 def thumbnail_reference(job) -> str | Path | None:
@@ -558,9 +595,10 @@ def verify_email_login(request: Request, background_tasks: BackgroundTasks, toke
     request.session.clear()
     request.session["user_id"] = int(user["id"])
     csrf_token(request)
-    if created:
+    new_creator = created and user["role"] == "creator"
+    if new_creator:
         background_tasks.add_task(send_welcome_email, str(user["email"]))
-    return RedirectResponse("/app", status_code=303)
+    return RedirectResponse("/settings?welcome=1" if new_creator else "/app", status_code=303)
 
 
 @app.get("/auth/google")
@@ -597,9 +635,10 @@ def google_callback(
     request.session.clear()
     request.session["user_id"] = int(user["id"])
     csrf_token(request)
-    if created:
+    new_creator = created and user["role"] == "creator"
+    if new_creator:
         background_tasks.add_task(send_welcome_email, str(user["email"]))
-    return RedirectResponse("/app", status_code=303)
+    return RedirectResponse("/settings?welcome=1" if new_creator else "/app", status_code=303)
 
 
 @app.post("/logout")
@@ -667,6 +706,8 @@ def dashboard(request: Request):
     if redirect:
         return redirect
     user_id, include_all = user_scope(request)
+    user = current_user(request)
+    connectors = [] if include_all else connector_statuses(user_id)
     counts = database.job_status_counts(user_id, include_all)
     summary = {
         "total": sum(counts.values()),
@@ -696,8 +737,19 @@ def dashboard(request: Request):
             summary=summary,
             jobs=database.list_jobs(limit=8, owner_id=user_id, include_all=include_all),
             media_items=reusable_media(request)[:4],
-            connectors=[] if include_all else connector_statuses(user_id),
-            storage_usage=None if include_all else creator_storage(current_user(request)),
+            connectors=connectors,
+            storage_usage=None if include_all else creator_storage(user),
+            creator_setup=None if include_all else {
+                "profile_complete": bool(
+                    str(user["creator_niche"]).strip()
+                    and str(user["target_audience"]).strip()
+                    and str(user["creator_goal"]).strip()
+                ),
+                "has_video": summary["total"] > 0,
+                "youtube_connected": any(
+                    item.name == "youtube" and item.configured for item in connectors
+                ),
+            },
         ),
     )
 
@@ -728,6 +780,11 @@ def storytelling_page(request: Request):
             voice_options=VOICE_OPTIONS,
             voice_directions=VOICE_DIRECTIONS,
             prompt_starters=prompt_starters(str(user["creator_niche"])),
+            profile_complete=bool(
+                str(user["creator_niche"]).strip()
+                and str(user["target_audience"]).strip()
+                and str(user["creator_goal"]).strip()
+            ),
         ),
     )
 
@@ -772,7 +829,11 @@ def showcase_video(request: Request, job_id: int):
     job = database.get_showcase_job(job_id)
     if not job:
         return HTMLResponse("Video not available", status_code=404)
-    return media_response(request, str(job["video_path"]), "video/mp4")
+    response = media_response(request, str(job["video_path"]), "video/mp4")
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["Content-Disposition"] = "inline"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    return response
 
 
 @app.get("/showcase/{job_id}/thumbnail")
@@ -815,6 +876,11 @@ def settings_page(request: Request):
             current_plan=PLANS.get(user["plan"], PLANS["free"]),
             niche_options=NICHE_OPTIONS,
             content_styles=CONTENT_STYLES,
+            profile_complete=bool(
+                str(user["creator_niche"]).strip()
+                and str(user["target_audience"]).strip()
+                and str(user["creator_goal"]).strip()
+            ),
         ),
     )
 
@@ -869,6 +935,10 @@ def update_settings(
         return HTMLResponse("Enter a story type using 120 characters or fewer", status_code=400)
     if not content_style.strip() or len(content_style.strip()) > 120:
         return HTMLResponse("Enter a picture style using 120 characters or fewer", status_code=400)
+    if not target_audience.strip() or len(target_audience.strip()) > 160:
+        return HTMLResponse("Describe your viewers using 160 characters or fewer", status_code=400)
+    if not creator_goal.strip() or len(creator_goal.strip()) > 300:
+        return HTMLResponse("Describe your video goal using 300 characters or fewer", status_code=400)
     if not 0.5 <= default_story_minutes <= float(user["max_minutes_per_job"]):
         return HTMLResponse("Default duration exceeds your plan limit", status_code=400)
     database.update_creator_settings(
@@ -931,7 +1001,7 @@ def billing_checkout(request: Request, plan: str, csrf: str = Form()):
             callback_url=f"{base_url}/billing/paystack/callback",
         )
     except RuntimeError as exc:
-        database.fail_payment_attempt(reference)
+        database.fail_payment_attempt(reference, str(exc))
         return HTMLResponse(str(exc), status_code=503)
     return RedirectResponse(url, status_code=303)
 
@@ -962,7 +1032,8 @@ def paystack_callback(request: Request, reference: str = ""):
                 int(current_user(request)["id"]), "billing",
                 f"Your {str(metadata.get('plan') or 'paid').title()} plan payment was confirmed.",
             )
-    except (RuntimeError, ValueError):
+    except (RuntimeError, ValueError) as exc:
+        database.fail_payment_attempt(reference, str(exc))
         return RedirectResponse("/subscription?billing=failed", status_code=303)
     return RedirectResponse("/subscription?billing=success", status_code=303)
 
@@ -991,7 +1062,12 @@ async def billing_webhook(request: Request):
         return {"received": True}
     reference = str(data.get("reference") or "")
     if event_type == "charge.failed":
-        database.fail_payment_attempt(reference)
+        reason = str(
+            data.get("gateway_response")
+            or data.get("message")
+            or "Payment was not completed."
+        )
+        database.fail_payment_attempt(reference, reason)
         return {"received": True}
     if event_type != "charge.success" or data.get("status") != "success":
         return {"received": True}
@@ -1421,6 +1497,15 @@ def job_detail(request: Request, job_id: int):
             job=job,
             publications=publications,
             feedback=database.get_job_feedback(job_id),
+            job_error_message=creator_job_error(job["error"]),
+            admin_job_log=(
+                job_log_excerpt(job) or (
+                    "No saved pipeline log is available for this failed job. "
+                    "The failure may have happened before logging started or the job was created by an older deployment."
+                )
+                if is_admin(current_user(request)) and job["status"] == "failed"
+                else ""
+            ),
             thumbnail_ready=thumbnail_available(job),
             shareable=shareable_job(job),
             share_url=(
@@ -1524,6 +1609,24 @@ def revoke_share_link(request: Request, job_id: int, csrf: str = Form()):
     if not job:
         return HTMLResponse("Job not found", status_code=404)
     database.set_job_share_token(job_id, None)
+    return RedirectResponse(f"/jobs/{job_id}", status_code=303)
+
+
+@app.post("/jobs/{job_id}/showcase")
+def set_showcase_visibility(
+    request: Request, job_id: int, visible: str = Form("no"), csrf: str = Form()
+):
+    redirect = creator_required(request)
+    if redirect:
+        return redirect
+    verify_csrf(request, csrf)
+    job, _ = owned_job(request, job_id)
+    if not shareable_job(job):
+        return HTMLResponse("Only finished videos can be added to the Story Gallery", status_code=409)
+    user = current_user(request)
+    database.set_job_showcase_visibility(
+        job_id, int(user["id"]), visible == "yes"
+    )
     return RedirectResponse(f"/jobs/{job_id}", status_code=303)
 
 

@@ -62,7 +62,7 @@ def initialize() -> None:
                 role TEXT NOT NULL DEFAULT 'creator' CHECK(role IN ('admin', 'creator')),
                 plan TEXT NOT NULL DEFAULT 'free',
                 status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'suspended')),
-                monthly_job_limit INTEGER NOT NULL DEFAULT 3,
+                monthly_job_limit INTEGER NOT NULL DEFAULT 2,
                 max_minutes_per_job REAL NOT NULL DEFAULT 5,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
@@ -103,6 +103,7 @@ def initialize() -> None:
                 video_path TEXT,
                 script_path TEXT,
                 share_token TEXT,
+                showcase_visible BOOLEAN NOT NULL DEFAULT FALSE,
                 log_path TEXT,
                 error TEXT,
                 created_at TEXT NOT NULL,
@@ -163,6 +164,7 @@ def initialize() -> None:
                 amount_ngn INTEGER NOT NULL,
                 status TEXT NOT NULL,
                 provider_transaction_id TEXT NOT NULL DEFAULT '',
+                failure_reason TEXT NOT NULL DEFAULT '',
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
@@ -230,6 +232,7 @@ def initialize() -> None:
             ALTER TABLE users ADD COLUMN IF NOT EXISTS creator_goal TEXT NOT NULL DEFAULT '';
             ALTER TABLE users ADD COLUMN IF NOT EXISTS next_job_number INTEGER NOT NULL DEFAULT 1;
             ALTER TABLE users ADD COLUMN IF NOT EXISTS storage_limit_bytes BIGINT NOT NULL DEFAULT 1073741824;
+            ALTER TABLE users ALTER COLUMN monthly_job_limit SET DEFAULT 2;
             ALTER TABLE users ALTER COLUMN max_minutes_per_job SET DEFAULT 5;
             ALTER TABLE jobs ADD COLUMN IF NOT EXISTS narration_voice TEXT NOT NULL DEFAULT 'Kore';
             ALTER TABLE jobs ADD COLUMN IF NOT EXISTS voice_direction TEXT NOT NULL DEFAULT 'neutral';
@@ -238,11 +241,14 @@ def initialize() -> None:
             ALTER TABLE jobs ADD COLUMN IF NOT EXISTS creator_niche TEXT NOT NULL DEFAULT '';
             ALTER TABLE jobs ADD COLUMN IF NOT EXISTS target_audience TEXT NOT NULL DEFAULT '';
             ALTER TABLE jobs ADD COLUMN IF NOT EXISTS content_style TEXT NOT NULL DEFAULT 'cinematic';
+            ALTER TABLE jobs ADD COLUMN IF NOT EXISTS creator_goal TEXT NOT NULL DEFAULT '';
             ALTER TABLE jobs ADD COLUMN IF NOT EXISTS youtube_privacy TEXT NOT NULL DEFAULT 'private';
+            ALTER TABLE jobs ADD COLUMN IF NOT EXISTS showcase_visible BOOLEAN NOT NULL DEFAULT FALSE;
             ALTER TABLE jobs ALTER COLUMN youtube_privacy SET DEFAULT 'public';
             ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS paystack_customer_code TEXT NOT NULL DEFAULT '';
             ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS payment_reference TEXT NOT NULL DEFAULT '';
             ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'paystack';
+            ALTER TABLE payment_attempts ADD COLUMN IF NOT EXISTS failure_reason TEXT NOT NULL DEFAULT '';
             """
         )
         db.execute(
@@ -274,6 +280,7 @@ def initialize() -> None:
     import_legacy_sqlite()
     initialize_creator_job_numbers()
     initialize_plan_limits()
+    initialize_free_plan_v2()
     initialize_storage_limits()
     initialize_story_usage()
     ensure_configured_accounts()
@@ -337,6 +344,25 @@ def initialize_plan_limits() -> None:
         db.execute(
             "INSERT INTO app_migrations (name, applied_at) VALUES (?, ?)",
             ("commercial_plan_limits_v1", utc_now()),
+        )
+
+
+def initialize_free_plan_v2() -> None:
+    """Apply the reduced Free allowance once without changing paid accounts."""
+    with connect() as db:
+        migration = "free_plan_two_jobs_v2"
+        if db.execute(
+            "SELECT 1 AS present FROM app_migrations WHERE name=?", (migration,)
+        ).fetchone():
+            return
+        db.execute(
+            """UPDATE users SET monthly_job_limit=?, updated_at=?
+            WHERE role='creator' AND plan='free'""",
+            (plan_for("free").monthly_jobs, utc_now()),
+        )
+        db.execute(
+            "INSERT INTO app_migrations (name, applied_at) VALUES (?, ?)",
+            (migration, utc_now()),
         )
 
 
@@ -611,9 +637,9 @@ def create_story_job(
             """INSERT INTO jobs
             (owner_id, owner_job_number, kind, status, topic, minutes, title, description, hashtags,
              platforms, scheduled_at, source_path, narration_voice, voice_direction, max_images,
-             creator_niche, target_audience, content_style,
+             creator_niche, target_audience, content_style, creator_goal,
              created_at, updated_at)
-            VALUES (?, ?, 'automatic', 'queued', ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, 'automatic', 'queued', ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             RETURNING id""",
             (
                 owner_id,
@@ -631,6 +657,7 @@ def create_story_job(
                 user["creator_niche"],
                 user["target_audience"],
                 user["content_style"],
+                user["creator_goal"],
                 now,
                 now,
             ),
@@ -650,6 +677,28 @@ def create_story_job(
                 (job_id, platform, now),
             )
         return job_id, None
+
+
+def recent_story_ideas(user_id: int, exclude_job_id: int, limit: int = 6) -> list[str]:
+    """Return only this creator's recent concepts to reduce accidental repetition."""
+    with connect() as db:
+        rows = db.execute(
+            """SELECT topic, title FROM jobs
+            WHERE owner_id=? AND kind='automatic' AND id!=?
+            ORDER BY id DESC LIMIT ?""",
+            (user_id, exclude_job_id, limit),
+        ).fetchall()
+    ideas = []
+    for row in rows:
+        parts = [
+            value for value in (
+                str(row["title"] or "").strip(),
+                str(row["topic"] or "").strip(),
+            ) if value
+        ]
+        if parts:
+            ideas.append(" — ".join(parts))
+    return ideas
 
 
 def create_uploaded_media(
@@ -725,6 +774,7 @@ def list_showcase_jobs(limit: int = 60):
             FROM jobs j
             JOIN users u ON u.id=j.owner_id
             WHERE j.kind='automatic'
+            AND j.showcase_visible=TRUE
             AND j.status IN ('completed', 'published', 'waiting_for_connections')
             AND j.video_path IS NOT NULL AND j.video_path != ''
             AND u.status='active'
@@ -741,6 +791,7 @@ def get_showcase_job(job_id: int):
             FROM jobs j
             JOIN users u ON u.id=j.owner_id
             WHERE j.id=? AND j.kind='automatic'
+            AND j.showcase_visible=TRUE
             AND j.status IN ('completed', 'published', 'waiting_for_connections')
             AND j.video_path IS NOT NULL AND j.video_path != ''
             AND u.status='active'""",
@@ -813,6 +864,15 @@ def set_job_share_token(job_id: int, token: str | None) -> None:
         db.execute(
             "UPDATE jobs SET share_token = ?, updated_at = ? WHERE id = ?",
             (token, utc_now(), job_id),
+        )
+
+
+def set_job_showcase_visibility(job_id: int, owner_id: int, visible: bool) -> None:
+    with connect() as db:
+        db.execute(
+            """UPDATE jobs SET showcase_visible=?, updated_at=?
+            WHERE id=? AND owner_id=?""",
+            (visible, utc_now(), job_id, owner_id),
         )
 
 
@@ -1125,12 +1185,12 @@ def create_payment_attempt(
         )
 
 
-def fail_payment_attempt(reference: str) -> None:
+def fail_payment_attempt(reference: str, reason: str = "") -> None:
     with connect() as db:
         db.execute(
-            """UPDATE payment_attempts SET status='failed', updated_at=?
+            """UPDATE payment_attempts SET status='failed', failure_reason=?, updated_at=?
             WHERE reference=? AND status='pending'""",
-            (utc_now(), reference),
+            (reason.strip()[:500], utc_now(), reference),
         )
 
 

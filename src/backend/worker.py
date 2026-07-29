@@ -51,6 +51,21 @@ def newest_video(before: set[Path]) -> Path:
     return max(candidates, key=lambda path: path.stat().st_mtime_ns)
 
 
+def failure_detail(exc: Exception, log_path: Path) -> str:
+    """Keep the useful end of a failed pipeline log for diagnosis and safe retrying."""
+    if not isinstance(exc, subprocess.CalledProcessError):
+        return str(exc)
+    try:
+        lines = [
+            line.strip() for line in log_path.read_text(encoding="utf-8").splitlines()
+            if line.strip() and set(line.strip()) != {"="}
+        ]
+    except OSError:
+        lines = []
+    excerpt = "\n".join(lines[-10:])[-1800:]
+    return excerpt or f"The video pipeline stopped with exit code {exc.returncode}."
+
+
 def resumable_script(job) -> Path | None:
     configured = job.get("script_path")
     if configured:
@@ -88,6 +103,7 @@ def run_automatic(job, log_file) -> Path:
         "--max-images", str(job.get("max_images") or 8),
         "--niche", job.get("creator_niche") or "",
         "--audience", job.get("target_audience") or "",
+        "--goal", job.get("creator_goal") or "",
         "--content-style", job.get("content_style") or "cinematic",
     ])
     process = subprocess.Popen(
@@ -225,6 +241,11 @@ def process_job(job) -> None:
                         hashtags=job["hashtags"] or "",
                         niche=job.get("creator_niche") or "",
                         audience=job.get("target_audience") or "",
+                        content_style=job.get("content_style") or "",
+                        creator_goal=job.get("creator_goal") or "",
+                        recent_ideas=database.recent_story_ideas(
+                            int(job["owner_id"]), int(job["id"])
+                        ),
                     )
                     if database.cancellation_requested(job["id"]):
                         raise JobCancelled
@@ -352,8 +373,9 @@ def process_job(job) -> None:
                         pass
         log_path.unlink(missing_ok=True)
     except (OSError, subprocess.CalledProcessError, RuntimeError) as exc:
-        database.update_job(job["id"], "failed", error=str(exc))
-        storage_full = str(exc).startswith("Storage is full.")
+        detail = failure_detail(exc, log_path)
+        database.update_job(job["id"], "failed", error=detail)
+        storage_full = detail.startswith("Storage is full.")
         notify_creator(
             job.get("owner_id"),
             (
