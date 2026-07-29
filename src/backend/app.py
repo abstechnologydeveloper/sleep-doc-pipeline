@@ -1247,6 +1247,10 @@ async def automatic_job(request: Request):
     if redirect:
         return redirect
     user = current_user(request)
+    if not is_admin(user) and user["plan"] == "free":
+        return HTMLResponse(
+            "Choose a paid plan before creating a video.", status_code=403
+        )
     form = await request.form()
     try:
         verify_csrf(request, str(form.get("csrf", "")))
@@ -1609,24 +1613,6 @@ def revoke_share_link(request: Request, job_id: int, csrf: str = Form()):
     if not job:
         return HTMLResponse("Job not found", status_code=404)
     database.set_job_share_token(job_id, None)
-    return RedirectResponse(f"/jobs/{job_id}", status_code=303)
-
-
-@app.post("/jobs/{job_id}/showcase")
-def set_showcase_visibility(
-    request: Request, job_id: int, visible: str = Form("no"), csrf: str = Form()
-):
-    redirect = creator_required(request)
-    if redirect:
-        return redirect
-    verify_csrf(request, csrf)
-    job, _ = owned_job(request, job_id)
-    if not shareable_job(job):
-        return HTMLResponse("Only finished videos can be added to the Story Gallery", status_code=409)
-    user = current_user(request)
-    database.set_job_showcase_visibility(
-        job_id, int(user["id"]), visible == "yes"
-    )
     return RedirectResponse(f"/jobs/{job_id}", status_code=303)
 
 

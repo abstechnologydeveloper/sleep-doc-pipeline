@@ -29,18 +29,6 @@
         {% endif %}
       </div>
       {% endif %}
-      {% if shareable and not is_admin %}
-      <div class="share-panel">
-        <strong>Story Gallery</strong>
-        {% if job.showcase_visible %}
-          <p>Other signed-in creators can watch this video for inspiration. It has no gallery download button.</p>
-          <form method="post" action="/jobs/{{ job.id }}/showcase"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="visible" value="no"><button class="text-button share-revoke" type="submit">Remove from Story Gallery</button></form>
-        {% else %}
-          <p>Your video is private. Add it only if you want other signed-in creators to watch it.</p>
-          <form method="post" action="/jobs/{{ job.id }}/showcase"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="visible" value="yes"><button class="button secondary" type="submit">Add to Story Gallery</button></form>
-        {% endif %}
-      </div>
-      {% endif %}
     {% else %}
       <div class="processing-state"><span class="spinner"></span><strong>{{ job.status|friendly_status }}</strong><p>You can leave this page. It will update automatically.</p></div>
     {% endif %}
