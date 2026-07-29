@@ -1001,21 +1001,40 @@ def billing_checkout(request: Request, plan: str, csrf: str = Form()):
     return RedirectResponse(url, status_code=303)
 
 
+def paystack_metadata(data: dict) -> dict:
+    """Return Paystack metadata as a mapping across API response variants."""
+    metadata = data.get("metadata") or {}
+    if isinstance(metadata, str):
+        try:
+            metadata = json.loads(metadata)
+        except json.JSONDecodeError:
+            return {}
+    return metadata if isinstance(metadata, dict) else {}
+
+
 @app.get("/billing/paystack/callback")
-def paystack_callback(request: Request, reference: str = ""):
+def paystack_callback(
+    request: Request, reference: str = "", trxref: str = ""
+):
     redirect = creator_required(request)
     if redirect:
         return redirect
+    payment_reference = (reference or trxref).strip()
     try:
-        data = paystack.verify_transaction(reference)
-        if data.get("status") != "success" or str(data.get("reference")) != reference:
-            raise RuntimeError("Paystack has not confirmed this payment.")
-        metadata = data.get("metadata") or {}
-        if str(metadata.get("user_id")) != str(current_user(request)["id"]):
+        attempt = database.payment_attempt(payment_reference)
+        if not attempt:
+            raise RuntimeError("This payment reference was not found.")
+        if int(attempt["user_id"]) != int(current_user(request)["id"]):
             raise RuntimeError("This payment belongs to a different account.")
+        data = paystack.verify_transaction(payment_reference)
+        if (
+            data.get("status") != "success"
+            or str(data.get("reference")) != payment_reference
+        ):
+            raise RuntimeError("Paystack has not confirmed this payment.")
         activated = database.activate_paystack_payment(
-            reference=reference,
-            event_id=f"verify:{data.get('id') or reference}",
+            reference=payment_reference,
+            event_id=f"verify:{data.get('id') or payment_reference}",
             event_type="transaction.verify",
             amount_kobo=int(data.get("amount") or 0),
             currency=str(data.get("currency") or ""),
@@ -1025,11 +1044,45 @@ def paystack_callback(request: Request, reference: str = ""):
         if activated:
             database.add_notification(
                 int(current_user(request)["id"]), "billing",
-                f"Your {str(metadata.get('plan') or 'paid').title()} plan payment was confirmed.",
+                f"Your {str(attempt['plan']).title()} plan payment was confirmed.",
             )
     except (RuntimeError, ValueError) as exc:
+        database.fail_payment_attempt(payment_reference, str(exc))
+        reason = quote_plus(str(exc)[:300])
+        return RedirectResponse(
+            f"/subscription?billing=failed&reason={reason}", status_code=303
+        )
+    return RedirectResponse("/subscription?billing=success", status_code=303)
+
+
+@app.post("/billing/paystack/recheck/{reference}")
+def recheck_paystack_payment(request: Request, reference: str, csrf: str = Form()):
+    redirect = creator_required(request)
+    if redirect:
+        return redirect
+    try:
+        verify_csrf(request, csrf)
+        attempt = database.payment_attempt(reference)
+        if not attempt or int(attempt["user_id"]) != int(current_user(request)["id"]):
+            raise RuntimeError("This payment reference was not found.")
+        data = paystack.verify_transaction(reference)
+        if data.get("status") != "success" or str(data.get("reference")) != reference:
+            raise RuntimeError("Paystack has not confirmed this payment.")
+        database.activate_paystack_payment(
+            reference=reference,
+            event_id=f"recheck:{data.get('id') or reference}",
+            event_type="transaction.recheck",
+            amount_kobo=int(data.get("amount") or 0),
+            currency=str(data.get("currency") or ""),
+            provider_transaction_id=str(data.get("id") or ""),
+            customer_code=str((data.get("customer") or {}).get("customer_code") or ""),
+        )
+    except (RuntimeError, ValueError) as exc:
         database.fail_payment_attempt(reference, str(exc))
-        return RedirectResponse("/subscription?billing=failed", status_code=303)
+        return RedirectResponse(
+            f"/subscription?billing=failed&reason={quote_plus(str(exc)[:300])}",
+            status_code=303,
+        )
     return RedirectResponse("/subscription?billing=success", status_code=303)
 
 
@@ -1052,7 +1105,7 @@ async def billing_webhook(request: Request):
                 "Paid access was paused because Paystack reported a payment dispute. Contact support if this is unexpected.",
             )
         return {"received": True}
-    metadata = data.get("metadata") or {}
+    metadata = paystack_metadata(data)
     if metadata.get("type") != "SLEEP_STUDIO_SUBSCRIPTION":
         return {"received": True}
     reference = str(data.get("reference") or "")
