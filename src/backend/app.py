@@ -723,6 +723,7 @@ def settings_page(request: Request):
             request,
             "settings",
             voice_options=VOICE_OPTIONS,
+            voice_directions=VOICE_DIRECTIONS,
             current_plan=PLANS.get(user["plan"], PLANS["free"]),
             niche_options=NICHE_OPTIONS,
             content_styles=CONTENT_STYLES,
