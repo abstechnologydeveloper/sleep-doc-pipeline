@@ -571,7 +571,7 @@ def queue_story_publication(
     with connect() as db:
         job = db.execute(
             """SELECT id, status FROM jobs WHERE id=? AND owner_id=?
-            AND kind='automatic' AND video_path IS NOT NULL AND video_path!=''
+            AND video_path IS NOT NULL AND video_path!=''
             FOR UPDATE""",
             (job_id, owner_id),
         ).fetchone()
@@ -1216,7 +1216,7 @@ def activate_paystack_payment(
         ).fetchone()
         if not attempt:
             raise ValueError("Unknown Paystack payment reference")
-        if currency != "NGN" or amount_kobo != int(attempt["amount_ngn"]) * 100:
+        if currency.upper() != "NGN" or amount_kobo != int(attempt["amount_ngn"]) * 100:
             raise ValueError("Paystack payment amount or currency does not match checkout")
         if attempt["status"] == "paid":
             return False

@@ -244,13 +244,7 @@ def reusable_media(request: Request) -> list[dict]:
 def reusable_media_job(job) -> bool:
     if not job or not job["video_path"]:
         return False
-    try:
-        platforms = json.loads(job["platforms"])
-    except (TypeError, json.JSONDecodeError):
-        return False
-    return job["kind"] == "automatic" or (
-        job["kind"] == "manual" and not platforms
-    )
+    return job["kind"] in {"automatic", "manual"}
 
 
 def shareable_job(job) -> bool:
@@ -874,6 +868,7 @@ def settings_page(request: Request):
             voice_options=VOICE_OPTIONS,
             voice_directions=VOICE_DIRECTIONS,
             current_plan=PLANS.get(user["plan"], PLANS["free"]),
+            connectors=connector_statuses(int(user["id"])),
             niche_options=NICHE_OPTIONS,
             content_styles=CONTENT_STYLES,
             profile_complete=bool(
@@ -1006,21 +1001,40 @@ def billing_checkout(request: Request, plan: str, csrf: str = Form()):
     return RedirectResponse(url, status_code=303)
 
 
+def paystack_metadata(data: dict) -> dict:
+    """Return Paystack metadata as a mapping across API response variants."""
+    metadata = data.get("metadata") or {}
+    if isinstance(metadata, str):
+        try:
+            metadata = json.loads(metadata)
+        except json.JSONDecodeError:
+            return {}
+    return metadata if isinstance(metadata, dict) else {}
+
+
 @app.get("/billing/paystack/callback")
-def paystack_callback(request: Request, reference: str = ""):
+def paystack_callback(
+    request: Request, reference: str = "", trxref: str = ""
+):
     redirect = creator_required(request)
     if redirect:
         return redirect
+    payment_reference = (reference or trxref).strip()
     try:
-        data = paystack.verify_transaction(reference)
-        if data.get("status") != "success" or str(data.get("reference")) != reference:
-            raise RuntimeError("Paystack has not confirmed this payment.")
-        metadata = data.get("metadata") or {}
-        if str(metadata.get("user_id")) != str(current_user(request)["id"]):
+        attempt = database.payment_attempt(payment_reference)
+        if not attempt:
+            raise RuntimeError("This payment reference was not found.")
+        if int(attempt["user_id"]) != int(current_user(request)["id"]):
             raise RuntimeError("This payment belongs to a different account.")
+        data = paystack.verify_transaction(payment_reference)
+        if (
+            data.get("status") != "success"
+            or str(data.get("reference")) != payment_reference
+        ):
+            raise RuntimeError("Paystack has not confirmed this payment.")
         activated = database.activate_paystack_payment(
-            reference=reference,
-            event_id=f"verify:{data.get('id') or reference}",
+            reference=payment_reference,
+            event_id=f"verify:{data.get('id') or payment_reference}",
             event_type="transaction.verify",
             amount_kobo=int(data.get("amount") or 0),
             currency=str(data.get("currency") or ""),
@@ -1030,11 +1044,45 @@ def paystack_callback(request: Request, reference: str = ""):
         if activated:
             database.add_notification(
                 int(current_user(request)["id"]), "billing",
-                f"Your {str(metadata.get('plan') or 'paid').title()} plan payment was confirmed.",
+                f"Your {str(attempt['plan']).title()} plan payment was confirmed.",
             )
     except (RuntimeError, ValueError) as exc:
+        database.fail_payment_attempt(payment_reference, str(exc))
+        reason = quote_plus(str(exc)[:300])
+        return RedirectResponse(
+            f"/subscription?billing=failed&reason={reason}", status_code=303
+        )
+    return RedirectResponse("/subscription?billing=success", status_code=303)
+
+
+@app.post("/billing/paystack/recheck/{reference}")
+def recheck_paystack_payment(request: Request, reference: str, csrf: str = Form()):
+    redirect = creator_required(request)
+    if redirect:
+        return redirect
+    try:
+        verify_csrf(request, csrf)
+        attempt = database.payment_attempt(reference)
+        if not attempt or int(attempt["user_id"]) != int(current_user(request)["id"]):
+            raise RuntimeError("This payment reference was not found.")
+        data = paystack.verify_transaction(reference)
+        if data.get("status") != "success" or str(data.get("reference")) != reference:
+            raise RuntimeError("Paystack has not confirmed this payment.")
+        database.activate_paystack_payment(
+            reference=reference,
+            event_id=f"recheck:{data.get('id') or reference}",
+            event_type="transaction.recheck",
+            amount_kobo=int(data.get("amount") or 0),
+            currency=str(data.get("currency") or ""),
+            provider_transaction_id=str(data.get("id") or ""),
+            customer_code=str((data.get("customer") or {}).get("customer_code") or ""),
+        )
+    except (RuntimeError, ValueError) as exc:
         database.fail_payment_attempt(reference, str(exc))
-        return RedirectResponse("/subscription?billing=failed", status_code=303)
+        return RedirectResponse(
+            f"/subscription?billing=failed&reason={quote_plus(str(exc)[:300])}",
+            status_code=303,
+        )
     return RedirectResponse("/subscription?billing=success", status_code=303)
 
 
@@ -1057,7 +1105,7 @@ async def billing_webhook(request: Request):
                 "Paid access was paused because Paystack reported a payment dispute. Contact support if this is unexpected.",
             )
         return {"received": True}
-    metadata = data.get("metadata") or {}
+    metadata = paystack_metadata(data)
     if metadata.get("type") != "SLEEP_STUDIO_SUBSCRIPTION":
         return {"received": True}
     reference = str(data.get("reference") or "")
@@ -1095,7 +1143,7 @@ def social_page(request: Request):
     redirect = creator_required(request)
     if redirect:
         return redirect
-    return render_social_page(request, request.query_params.get("connection_error"))
+    return RedirectResponse("/settings#social-connections", status_code=303)
 
 
 @app.get("/connections/youtube")
@@ -1109,7 +1157,7 @@ def connect_youtube(request: Request):
         return RedirectResponse(youtube_authorization_url(state), status_code=303)
     except RuntimeError:
         return RedirectResponse(
-            "/social?connection_error=YouTube+connection+is+not+configured",
+            "/settings?connection_error=YouTube+connection+is+not+configured#social-connections",
             status_code=303,
         )
 
@@ -1128,7 +1176,7 @@ def youtube_callback(
     expected = str(request.session.pop("youtube_oauth_state", ""))
     if not expected or not hmac.compare_digest(expected, state):
         return RedirectResponse(
-            "/social?connection_error=Invalid+YouTube+connection+state",
+            "/settings?connection_error=Invalid+YouTube+connection+state#social-connections",
             status_code=303,
         )
     if error:
@@ -1142,7 +1190,7 @@ def youtube_callback(
             else "Google did not approve the YouTube connection. Please try again."
         )
         return RedirectResponse(
-            f"/social?connection_error={quote_plus(message)}", status_code=303
+            f"/settings?connection_error={quote_plus(message)}#social-connections", status_code=303
         )
     user_id = int(current_user(request)["id"])
     try:
@@ -1181,9 +1229,9 @@ def youtube_callback(
         else:
             message = "YouTube could not be connected. Please try again."
         return RedirectResponse(
-            f"/social?connection_error={quote_plus(message)}", status_code=303
+            f"/settings?connection_error={quote_plus(message)}#social-connections", status_code=303
         )
-    return RedirectResponse("/social", status_code=303)
+    return RedirectResponse("/settings?youtube_connected=1#social-connections", status_code=303)
 
 
 @app.post("/connections/youtube/disconnect")
@@ -1196,7 +1244,7 @@ def disconnect_youtube(request: Request, csrf: str = Form()):
     except ValueError:
         return HTMLResponse("Invalid form token", status_code=400)
     database.delete_social_connection(int(current_user(request)["id"]), "youtube")
-    return RedirectResponse("/social", status_code=303)
+    return RedirectResponse("/settings?youtube_disconnected=1#social-connections", status_code=303)
 
 
 @app.get("/jobs", response_class=HTMLResponse)
@@ -1411,35 +1459,22 @@ async def create_social_post(request: Request):
     except ValueError as exc:
         return render_social_page(request, str(exc), 400)
     owner_id = int(current_user(request)["id"])
-    if media_job["kind"] == "automatic":
-        if not database.queue_story_publication(
-            job_id=media_job_id,
-            owner_id=owner_id,
-            title=title,
-            description=description,
-            hashtags=hashtags,
-            platforms=platforms,
-            scheduled_at=scheduled_at,
-            youtube_privacy=youtube_privacy,
-        ):
-            return render_social_page(
-                request,
-                "This video is already busy. Wait for it to finish before publishing again.",
-                409,
-            )
-        job_id = media_job_id
-    else:
-        job_id = database.create_job(
-            owner_id=owner_id,
-            kind="manual",
-            title=title,
-            description=description,
-            hashtags=hashtags,
-            platforms=platforms,
-            scheduled_at=scheduled_at,
-            source_path=video_reference,
-            youtube_privacy=youtube_privacy,
+    if not database.queue_story_publication(
+        job_id=media_job_id,
+        owner_id=owner_id,
+        title=title,
+        description=description,
+        hashtags=hashtags,
+        platforms=platforms,
+        scheduled_at=scheduled_at,
+        youtube_privacy=youtube_privacy,
+    ):
+        return render_social_page(
+            request,
+            "This video is already busy. Wait for it to finish before publishing again.",
+            409,
         )
+    job_id = media_job_id
     return RedirectResponse(f"/jobs/{job_id}", status_code=303)
 
 
@@ -1511,6 +1546,10 @@ def job_detail(request: Request, job_id: int):
                 else ""
             ),
             thumbnail_ready=thumbnail_available(job),
+            youtube_connected=any(
+                item.name == "youtube" and item.configured
+                for item in connector_statuses(int(current_user(request)["id"]))
+            ) if not is_admin(current_user(request)) else False,
             shareable=shareable_job(job),
             share_url=(
                 str(request.url_for("public_share", token=job["share_token"]))
@@ -1519,6 +1558,57 @@ def job_detail(request: Request, job_id: int):
             ),
         ),
     )
+
+
+@app.post("/jobs/{job_id}/publish")
+async def publish_job(request: Request, job_id: int):
+    redirect = creator_required(request)
+    if redirect:
+        return redirect
+    form = await request.form()
+    try:
+        verify_csrf(request, str(form.get("csrf", "")))
+    except ValueError:
+        return HTMLResponse("Invalid form token", status_code=400)
+    job, _ = owned_job(request, job_id)
+    if not reusable_media_job(job):
+        return HTMLResponse("This finished video is not available.", status_code=409)
+    if not any(
+        item.name == "youtube" and item.configured
+        for item in connector_statuses(int(current_user(request)["id"]))
+    ):
+        return RedirectResponse(
+            f"/jobs/{job_id}?publish_error=Connect+YouTube+before+publishing",
+            status_code=303,
+        )
+    youtube_privacy = str(form.get("youtube_privacy", "public")).strip().lower()
+    if youtube_privacy not in {"public", "unlisted", "private"}:
+        return HTMLResponse("Choose a valid YouTube visibility.", status_code=400)
+    try:
+        scheduled_at = normalized_schedule(str(form.get("scheduled_at", "")))
+        title = str(form.get("title", "")).strip() or str(job["title"] or "")
+        description = str(form.get("description", "")).strip() or str(job["description"] or "")
+        hashtags = str(form.get("hashtags", "")).strip() or str(job["hashtags"] or "")
+        validate_creator_content(title, description, hashtags)
+    except ValueError as exc:
+        return RedirectResponse(
+            f"/jobs/{job_id}?publish_error={quote_plus(str(exc))}", status_code=303
+        )
+    if not database.queue_story_publication(
+        job_id=job_id,
+        owner_id=int(current_user(request)["id"]),
+        title=title,
+        description=description,
+        hashtags=hashtags,
+        platforms=["youtube"],
+        scheduled_at=scheduled_at,
+        youtube_privacy=youtube_privacy,
+    ):
+        return RedirectResponse(
+            f"/jobs/{job_id}?publish_error=This+video+is+already+busy",
+            status_code=303,
+        )
+    return RedirectResponse(f"/jobs/{job_id}?publish=queued", status_code=303)
 
 
 @app.post("/jobs/{job_id}/feedback")

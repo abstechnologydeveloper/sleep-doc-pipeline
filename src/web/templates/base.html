@@ -33,9 +33,6 @@
         <a class="nav-item {{ 'active' if active_section == 'showcase' else '' }}" href="/showcase">
           {{ nav_icon('gallery') }}<span>Story Gallery</span>
         </a>
-        <a class="nav-item {{ 'active' if active_section == 'social' else '' }}" href="/social">
-          {{ nav_icon('publish') }}<span>Publish</span>
-        </a>
         {% if not is_admin %}<a class="nav-item {{ 'active' if active_section == 'notifications' else '' }}" href="/notifications">{{ nav_icon('bell') }}<span>Updates</span></a>{% endif %}
         <a class="nav-item {{ 'active' if active_section == 'settings' else '' }}" href="/settings">
           {{ nav_icon('account') }}<span>Video Recipe</span>
