@@ -326,6 +326,16 @@ html[data-theme="dark"] .story-preview { border-color: #39415a; box-shadow: 0 30
 .feature-grid article > span { color: #7890ff; font-size: 11px; font-weight: 800; }
 .feature-grid h3 { margin: 24px 0 9px; font-size: 17px; }
 .feature-grid p, .feature-stack p { margin: 0; font-size: 13px; }
+.automation-section { padding-block: 75px; }
+.automation-heading { display: grid; grid-template-columns: 1.1fr .9fr; gap: 70px; align-items: end; margin-bottom: 38px; }
+.automation-heading h2 { margin-bottom: 0; font-size: clamp(31px, 4vw, 48px); line-height: 1.05; letter-spacing: -.04em; }
+.automation-heading > p { margin-bottom: 0; }
+.automation-flow { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+.automation-flow article { position: relative; padding: 20px; border: 1px solid var(--border); border-radius: 12px; background: var(--card-gradient); }
+.automation-flow article > span { display: grid; place-items: center; width: 28px; height: 28px; margin-bottom: 22px; border-radius: 50%; background: var(--blue-soft); color: var(--blue); font-size: 11px; font-weight: 800; }
+.automation-flow strong, .automation-notes strong { display: block; margin-bottom: 7px; }
+.automation-flow p, .automation-notes p { margin: 0; font-size: 12px; }
+.automation-notes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 22px; margin-top: 24px; padding-top: 24px; border-top: 1px solid var(--border); }
 .split-feature { display: grid; grid-template-columns: 1fr 1fr; gap: 80px; align-items: center; }
 .check-list { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 28px 0 0; padding: 0; list-style: none; color: var(--text); font-size: 13px; }
 .check-list li::before { content: "✓"; margin-right: 8px; color: #7590ff; }
@@ -413,6 +423,8 @@ html[data-theme="dark"] .cta-panel { border-color: #3c4770; background: radial-g
   .filter-bar .button { width: 100%; }
   .marketing-nav nav > a:not(.button) { display: none; }
   .hero, .split-feature, .creator-story { grid-template-columns: 1fr; gap: 45px; }
+  .automation-heading { grid-template-columns: 1fr; gap: 14px; }
+  .automation-flow { grid-template-columns: 1fr 1fr; }
   .hero { padding-top: 60px; }
   .feature-grid { grid-template-columns: 1fr 1fr; }
   .value-grid { grid-template-columns: 1fr; }
@@ -446,5 +458,6 @@ html[data-theme="dark"] .cta-panel { border-color: #3c4770; background: radial-g
   .hero { min-height: auto; padding-bottom: 70px; }
   .hero h1 { font-size: 42px; }
   .feature-grid, .check-list { grid-template-columns: 1fr; }
+  .automation-flow, .automation-notes { grid-template-columns: 1fr; }
   .pricing-grid, .testimonial-grid { grid-template-columns: 1fr; }
 }
