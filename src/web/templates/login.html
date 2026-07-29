@@ -1,7 +1,7 @@
 {% extends 'base.html' %}
 {% block content %}
 <section class="login-panel">
-  <div class="login-brand"><span class="brand-mark">S</span><div><strong>Sleep Studio</strong><small>Content production workspace</small></div></div>
+  <div class="login-brand"><img class="brand-logo brand-logo-login" src="/static/logo.png?v=1" alt="My Automation Studio"></div>
   <div><p class="eyebrow">Creator access</p><h1>Create without passwords</h1><p>Use a secure email link or your Google account.</p></div>
   {% if error %}<div class="alert error">{{ error }}</div>{% endif %}
   {% if sent %}<div class="alert success">If that email can receive messages, a sign-in link is on its way.</div>{% endif %}

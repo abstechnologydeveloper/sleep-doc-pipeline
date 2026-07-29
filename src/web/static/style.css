@@ -72,6 +72,12 @@ small { display: block; color: var(--muted); line-height: 1.35; }
 }
 .brand { display: flex; align-items: center; gap: 11px; padding: 4px 8px 22px; color: var(--text); }
 .brand:hover { color: var(--text); }
+.brand-logo {
+  display: block; width: 190px; height: 58px; padding: 3px 7px;
+  border-radius: 8px; background: #fff; object-fit: cover;
+}
+.brand-logo-wide { width: 205px; height: 58px; }
+.brand-logo-login { width: 230px; height: 72px; }
 .brand-mark, .avatar {
   display: grid; place-items: center; flex: 0 0 auto; border-radius: 9px;
   background: var(--blue); color: #fff; font-weight: 800;
@@ -152,6 +158,10 @@ legend { padding: 0 5px; color: #c9ced8; font-size: 12px; }
 .check { display: flex !important; grid-template-columns: auto 1fr; align-items: center; gap: 7px !important; padding: 7px 9px; border: 1px solid var(--input-border); border-radius: 7px; font-weight: 500 !important; }
 .check input { width: auto; margin: 0; }
 .form-note { margin: 0; padding: 10px 12px; border-left: 2px solid var(--blue); background: var(--panel-soft); font-size: 12px; }
+.faq-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.faq-grid details { padding: 16px 18px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel); }
+.faq-grid summary { color: var(--text); cursor: pointer; font-weight: 750; }
+.faq-grid p { margin: 10px 0 0; font-size: 13px; }
 
 .button {
   display: inline-flex; justify-content: center; align-items: center; width: max-content;
@@ -503,13 +513,14 @@ html[data-theme="dark"] .cta-panel { border-color: #3c4770; background: radial-g
   .share-link-row { align-items: stretch; flex-direction: column; }
   .marketing-nav { width: 100%; padding: 12px; }
   .marketing-nav .brand small { display: none; }
+  .marketing-nav .brand-logo { width: 165px; height: 50px; }
   .marketing-nav nav { gap: 8px; }
   .marketing-nav .button { padding-inline: 10px; font-size: 11px; }
   .marketing-nav .theme-toggle { padding-inline: 8px; }
   .hero, .marketing-section { width: min(100% - 28px, 1180px); }
   .hero { min-height: auto; padding-bottom: 70px; }
   .hero h1 { font-size: 42px; }
-  .feature-grid, .check-list { grid-template-columns: 1fr; }
+  .feature-grid, .check-list, .faq-grid { grid-template-columns: 1fr; }
   .automation-flow, .automation-notes { grid-template-columns: 1fr; }
   .pricing-grid, .testimonial-grid { grid-template-columns: 1fr; }
   .subscription-title { display: grid; }

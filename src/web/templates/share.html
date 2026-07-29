@@ -4,10 +4,11 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="robots" content="noindex,nofollow">
-  <title>{{ job.title }} · Sleep Studio</title>
+  <title>{{ job.title }} · My Automation Studio</title>
+  <link rel="icon" type="image/png" href="/static/logo.png?v=1">
   <meta property="og:title" content="{{ job.title }}">
   <meta property="og:type" content="video.other">
-  <meta property="og:site_name" content="Sleep Studio">
+  <meta property="og:site_name" content="My Automation Studio">
   <meta property="og:url" content="{{ request.url_for('public_share', token=token) }}">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="{{ job.title }}">
@@ -22,14 +23,14 @@
   <meta property="og:image:alt" content="Thumbnail for {{ job.title }}">
   <meta name="twitter:image" content="{{ request.url_for('public_share_thumbnail', token=token) }}">
   {% endif %}
-  <script src="/static/theme.js?v=20260729-4"></script>
-  <link rel="stylesheet" href="/static/style.css?v=20260729-4">
+  <script src="/static/theme.js?v=20260729-17"></script>
+  <link rel="stylesheet" href="/static/style.css?v=20260729-18">
 </head>
 <body>
   <button class="theme-toggle" type="button" data-theme-toggle aria-label="Switch to dark mode">☾ Dark</button>
   <main class="auth-shell">
     <div class="public-share-shell">
-      <header class="public-share-header"><span class="brand-mark">S</span><strong>Sleep Studio</strong><span>Shared video</span></header>
+      <header class="public-share-header"><img class="brand-logo" src="/static/logo.png?v=1" alt="My Automation Studio"><span>Shared video</span></header>
       <section class="panel public-share-panel">
         <h1>{{ job.title }}</h1>
         {% if job.description %}<p>{{ job.description }}</p>{% endif %}

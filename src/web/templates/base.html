@@ -4,9 +4,15 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>{{ title or 'Sleep Studio' }}</title>
+  <title>{{ title or 'My Automation Studio' }}</title>
+  <meta name="application-name" content="My Automation Studio">
+  <meta name="theme-color" content="#0b1020">
+  <meta name="robots" content="noindex,nofollow,noarchive">
+  <link rel="icon" type="image/png" href="/static/logo.png?v=1">
+  <link rel="apple-touch-icon" href="/static/logo.png?v=1">
+  <link rel="manifest" href="/static/site.webmanifest">
   <script src="/static/theme.js?v=20260729-17"></script>
-  <link rel="stylesheet" href="/static/style.css?v=20260729-16">
+  <link rel="stylesheet" href="/static/style.css?v=20260729-18">
   <script defer src="/static/jobs.js?v=20260729-16"></script>
 </head>
 <body>
@@ -15,8 +21,7 @@
   <div class="app-shell">
     <aside class="sidebar" id="studio-sidebar">
       <a class="brand" href="/app">
-        <span class="brand-mark">S</span>
-        <span><strong>Sleep Studio</strong><small>{{ 'Admin control room' if is_admin else 'Story video creator' }}</small></span>
+        <img class="brand-logo" src="/static/logo.png?v=1" alt="My Automation Studio">
       </a>
       <nav aria-label="Studio navigation">
         <a class="nav-item {{ 'active' if active_section == 'overview' else '' }}" href="/app">
@@ -54,7 +59,7 @@
     <div class="workspace">
       <header class="mobile-header">
         <button class="menu-button" data-sidebar-toggle aria-controls="studio-sidebar" aria-expanded="false">☰</button>
-        <a href="/app">Sleep Studio</a>
+        <a href="/app">My Automation Studio</a>
       </header>
       <main>
 {% else %}

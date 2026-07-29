@@ -1,0 +1,17 @@
+{
+  "name": "My Automation Studio",
+  "short_name": "Automation Studio",
+  "description": "Create complete videos and prepare them for social publishing.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0b1020",
+  "theme_color": "#0b1020",
+  "icons": [
+    {
+      "src": "/static/logo.png",
+      "sizes": "1983x793",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}

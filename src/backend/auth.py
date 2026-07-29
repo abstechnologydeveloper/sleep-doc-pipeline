@@ -1,4 +1,4 @@
-"""Passwordless email and Google OAuth helpers for Sleep Studio."""
+"""Passwordless email and Google OAuth helpers for My Automation Studio."""
 
 import hashlib
 import json
@@ -44,9 +44,9 @@ def send_magic_link(email: str, token: str) -> None:
         {
             "from": sender,
             "to": [email],
-            "subject": "Your Sleep Studio sign-in link",
+            "subject": "Your My Automation Studio sign-in link",
             "html": (
-                "<h2>Sign in to Sleep Studio</h2>"
+                "<h2>Sign in to My Automation Studio</h2>"
                 f'<p><a href="{link}">Open your creator workspace</a></p>'
                 "<p>This one-time link expires in 15 minutes. "
                 "Ignore this email if you did not request it.</p>"

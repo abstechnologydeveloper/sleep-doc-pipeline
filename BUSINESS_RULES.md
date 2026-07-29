@@ -1,13 +1,13 @@
-# Sleep Studio Business Rules
+# My Automation Studio Business Rules
 
 1. Access to a creator account is granted only after Google verifies the email or a valid one-time email link is consumed.
-2. Sleep Studio never stores or accepts creator passwords.
+2. My Automation Studio never stores or accepts creator passwords.
 3. Email sign-in links expire after 15 minutes.
 4. Each email sign-in link can be used only once.
 5. Sign-in requests return the same confirmation whether or not an account already exists.
 6. An email address may request no more than five sign-in links per hour.
-7. Google sign-in must return a verified email and a token issued for Sleep Studio's configured OAuth client.
-8. One normalized email address represents one Sleep Studio user, even when multiple login methods are linked.
+7. Google sign-in must return a verified email and a token issued for My Automation Studio's configured OAuth client.
+8. One normalized email address represents one My Automation Studio user, even when multiple login methods are linked.
 9. The configured `ADMIN_EMAIL` becomes an administrator after its email is verified.
 10. Administrators may onboard creators by email, and all new non-admin accounts start as active creators on the free plan.
 11. A suspended creator cannot access an authenticated workspace or create work.
@@ -30,7 +30,7 @@
 28. Authentication, account-limit changes, job creation, YouTube publishing, sharing, retrying, and deletion require server-side validation; browser controls alone are never authoritative.
 29. OAuth state, authenticated sessions, YouTube connections, and all state-changing forms must use anti-forgery protection appropriate to their flow.
 30. Authentication errors must avoid revealing whether an email address is registered, and passwords, OAuth tokens, secrets, or one-time tokens must never be stored in plaintext.
-31. Sleep Studio offers Free, Basic, Pro, and Studio plans; only Basic, Pro, and Studio require payment.
+31. My Automation Studio offers Free, Basic, Pro, and Studio plans; only Basic, Pro, and Studio require payment.
 32. The Free plan includes 3 stories per rolling 30 days, up to 5 minutes and 8 generated scene images per story.
 33. The Basic plan is priced at ₦15,000 per 30 days and includes 10 stories, up to 10 minutes and 16 generated scene images per story.
 34. The Pro plan is priced at ₦40,000 per 30 days and includes 30 stories, up to 20 minutes and 32 generated scene images per story.
@@ -42,12 +42,12 @@
 40. Creators may select only a server-approved Gemini prebuilt narration voice; arbitrary model or voice identifiers are rejected.
 41. Voice labels describe tone rather than guaranteeing a speaker's gender, and creators should test a short story before a long production.
 42. Paystack Checkout is the only browser-accessible path for purchasing paid access, and plan entitlements are never accepted from browser form or callback values.
-43. A paid plan becomes effective only after Sleep Studio verifies a successful Paystack transaction or accepts a correctly signed `charge.success` webhook.
+43. A paid plan becomes effective only after My Automation Studio verifies a successful Paystack transaction or accepts a correctly signed `charge.success` webhook.
 44. Invalid or unsigned Paystack webhooks must be rejected before any account or payment data changes.
 45. Every Paystack payment uses a unique stored reference and is activated idempotently so callbacks and webhook retries cannot grant access twice.
 46. Expired, failed, incomplete, mismatched, or otherwise non-entitled payment access returns the creator to Free limits without deleting completed media.
 47. Subscription downgrades affect new jobs; queued or processing jobs keep the limits captured when they were created.
-48. Paystack-funded access lasts 30 days, is renewed manually, and does not create an automatic recurring charge in Sleep Studio.
+48. Paystack-funded access lasts 30 days, is renewed manually, and does not create an automatic recurring charge in My Automation Studio.
 49. Administrators may review and override creator plan labels and operational limits, but verified Paystack transactions remain the source of truth for payment status.
 50. Provider credentials, Paystack secrets, OAuth secrets, and encryption keys must come from protected environment configuration and must never be exposed in templates, logs, public links, or client-side code.
 51. Every creator has a private sequential job number that begins at 1 and increases atomically across generated stories, uploaded media, and social-post jobs.
@@ -62,7 +62,7 @@
 60. Suggested prompts must remain original starting points and must never request imitation of a named creator, artist, studio, franchise, or copyrighted character.
 61. Creator guidance may improve focus and production consistency but must never promise views, subscribers, revenue, virality, or platform approval.
 62. Landing-page success content must be labeled honestly as an illustrative workflow unless it is supported by a verified customer, permission, and evidence.
-63. Light mode is the default experience for new visitors and authenticated creators.
+63. The public landing page defaults to dark mode, while authenticated creators retain their saved theme preference.
 64. A user may switch to dark mode, and that preference is stored only in the user’s browser without changing account or job data.
 65. All essential navigation, forms, statuses, media controls, and billing actions must remain readable and usable in both light and dark themes.
 66. The public landing page must provide Open Graph and large-image card metadata with absolute HTTPS URLs when `PUBLIC_BASE_URL` is configured.

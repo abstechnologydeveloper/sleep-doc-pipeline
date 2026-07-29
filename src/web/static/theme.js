@@ -3,7 +3,9 @@
   const defaultTheme = root.dataset.defaultTheme === "dark" ? "dark" : "light";
   let saved = defaultTheme;
   try {
-    saved = localStorage.getItem("sleep-studio-theme") || defaultTheme;
+    saved = localStorage.getItem("my-automation-studio-theme")
+      || localStorage.getItem("sleep-studio-theme")
+      || defaultTheme;
   } catch {
     saved = defaultTheme;
   }
@@ -24,7 +26,7 @@
       button.addEventListener("click", () => {
         root.dataset.theme = root.dataset.theme === "dark" ? "light" : "dark";
         try {
-          localStorage.setItem("sleep-studio-theme", root.dataset.theme);
+          localStorage.setItem("my-automation-studio-theme", root.dataset.theme);
         } catch {
           // The theme still works for this page when browser storage is unavailable.
         }

@@ -38,7 +38,7 @@ def utc_now() -> str:
 def connect():
     database_url = os.getenv("DATABASE_URL", "").strip()
     if not database_url:
-        raise RuntimeError("DATABASE_URL must point to the Sleep Studio PostgreSQL database")
+        raise RuntimeError("DATABASE_URL must point to the My Automation Studio PostgreSQL database")
     connection = psycopg.connect(database_url, row_factory=dict_row)
     try:
         yield ConnectionAdapter(connection)
@@ -721,7 +721,7 @@ def list_showcase_jobs(limit: int = 60):
     with connect() as db:
         return db.execute(
             """SELECT j.*, COALESCE(NULLIF(u.channel_name, ''), NULLIF(u.name, ''),
-            'Sleep Studio creator') AS creator_name
+            'My Automation Studio creator') AS creator_name
             FROM jobs j
             JOIN users u ON u.id=j.owner_id
             WHERE j.kind='automatic'
@@ -737,7 +737,7 @@ def get_showcase_job(job_id: int):
     with connect() as db:
         return db.execute(
             """SELECT j.*, COALESCE(NULLIF(u.channel_name, ''), NULLIF(u.name, ''),
-            'Sleep Studio creator') AS creator_name
+            'My Automation Studio creator') AS creator_name
             FROM jobs j
             JOIN users u ON u.id=j.owner_id
             WHERE j.id=? AND j.kind='automatic'

@@ -1,4 +1,4 @@
-# Sleep Studio cost model
+# My Automation Studio cost model
 
 The published plan prices are starting prices, not proven margins. Review them monthly using
 real invoices and completed-job measurements.
