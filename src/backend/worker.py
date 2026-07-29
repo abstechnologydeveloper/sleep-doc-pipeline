@@ -23,6 +23,7 @@ from pipeline.script import safe_topic_slug
 
 from . import database, storage
 from .content import generate_post_metadata
+from .plans import VOICE_DIRECTIONS, VOICE_OPTIONS
 from .publishers import publish
 
 
@@ -96,10 +97,22 @@ def run_automatic(job, log_file) -> Path:
         command.extend(["--resume-script", str(script_path)])
     else:
         command.extend([job["topic"], str(job["minutes"])])
+    requested_voice = job.get("narration_voice") or "Kore"
+    requested_direction = job.get("voice_direction") or "neutral"
+    voice = requested_voice if requested_voice in VOICE_OPTIONS else "Kore"
+    voice_direction = (
+        requested_direction if requested_direction in VOICE_DIRECTIONS else "neutral"
+    )
+    if voice != requested_voice or voice_direction != requested_direction:
+        print(
+            "Saved narrator settings are no longer supported; using the safe default.",
+            file=log_file,
+            flush=True,
+        )
     command.extend([
         "--title", job["title"],
-        "--voice", job.get("narration_voice") or "Kore",
-        "--voice-direction", job.get("voice_direction") or "neutral",
+        "--voice", voice,
+        "--voice-direction", voice_direction,
         "--max-images", str(job.get("max_images") or 8),
         "--niche", job.get("creator_niche") or "",
         "--audience", job.get("target_audience") or "",
