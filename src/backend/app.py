@@ -1238,16 +1238,34 @@ async def create_social_post(request: Request):
         validate_creator_content(title, description, hashtags)
     except ValueError as exc:
         return render_social_page(request, str(exc), 400)
-    job_id = database.create_job(
-        owner_id=int(current_user(request)["id"]),
-        kind="manual",
-        title=title,
-        description=description,
-        hashtags=hashtags,
-        platforms=platforms,
-        scheduled_at=scheduled_at,
-        source_path=video_reference,
-    )
+    owner_id = int(current_user(request)["id"])
+    if media_job["kind"] == "automatic":
+        if not database.queue_story_publication(
+            job_id=media_job_id,
+            owner_id=owner_id,
+            title=title,
+            description=description,
+            hashtags=hashtags,
+            platforms=platforms,
+            scheduled_at=scheduled_at,
+        ):
+            return render_social_page(
+                request,
+                "This video is already busy. Wait for it to finish before publishing again.",
+                409,
+            )
+        job_id = media_job_id
+    else:
+        job_id = database.create_job(
+            owner_id=owner_id,
+            kind="manual",
+            title=title,
+            description=description,
+            hashtags=hashtags,
+            platforms=platforms,
+            scheduled_at=scheduled_at,
+            source_path=video_reference,
+        )
     return RedirectResponse(f"/jobs/{job_id}", status_code=303)
 
 

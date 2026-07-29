@@ -514,6 +514,43 @@ def create_job(**values) -> int:
         return int(job_id)
 
 
+def queue_story_publication(
+    *, job_id: int, owner_id: int, title: str, description: str,
+    hashtags: str, platforms: list[str], scheduled_at: str | None
+) -> bool:
+    """Publish an existing generated story without creating a duplicate job."""
+    now = utc_now()
+    with connect() as db:
+        job = db.execute(
+            """SELECT id, status FROM jobs WHERE id=? AND owner_id=?
+            AND kind='automatic' AND video_path IS NOT NULL AND video_path!=''
+            FOR UPDATE""",
+            (job_id, owner_id),
+        ).fetchone()
+        if not job or job["status"] in {
+            "queued", "processing", "publishing", "cancel_requested"
+        }:
+            return False
+        db.execute(
+            """UPDATE jobs SET status='queued', title=?, description=?, hashtags=?,
+            platforms=?, scheduled_at=?, error=NULL, updated_at=? WHERE id=?""",
+            (
+                title, description, hashtags, json.dumps(platforms),
+                scheduled_at, now, job_id,
+            ),
+        )
+        for platform in platforms:
+            db.execute(
+                """INSERT INTO publications (job_id, platform, status, updated_at)
+                VALUES (?, ?, 'pending', ?)
+                ON CONFLICT (job_id, platform) DO UPDATE SET
+                  status='pending', remote_id=NULL, remote_url=NULL,
+                  error=NULL, updated_at=EXCLUDED.updated_at""",
+                (job_id, platform, now),
+            )
+        return True
+
+
 def create_story_job(
     *,
     owner_id: int,
