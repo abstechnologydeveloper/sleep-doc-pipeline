@@ -319,7 +319,12 @@ html[data-theme="dark"] .story-preview { border-color: #39415a; box-shadow: 0 30
 .preview-status { display: flex; justify-content: space-between; padding: 7px 4px 3px; color: #aab1bf; font-size: 12px; }
 .preview-status strong { color: #8de0b8; }
 .logo-strip { display: flex; flex-wrap: wrap; justify-content: center; gap: 30px; padding: 23px 20px; border-block: 1px solid var(--border); color: var(--muted); font-size: 12px; }
-.logo-strip strong { color: var(--text); }
+.logo-strip strong { display: inline-flex; align-items: center; gap: 7px; color: var(--text); }
+.logo-strip strong::before, .platform-support strong::before { display: grid; place-items: center; flex: 0 0 24px; width: 24px; height: 24px; border-radius: 7px; color: #fff; font-size: 12px; font-weight: 900; }
+.logo-strip strong:nth-of-type(1)::before, .platform-support > div:nth-child(1) strong::before { content: "▶"; background: #ff0033; font-size: 9px; }
+.logo-strip strong:nth-of-type(2)::before, .platform-support > div:nth-child(2) strong::before { content: "f"; background: #1877f2; font-family: Arial, sans-serif; font-size: 17px; }
+.logo-strip strong:nth-of-type(3)::before, .platform-support > div:nth-child(3) strong::before { content: "◎"; background: linear-gradient(145deg, #7c3aed, #e1306c 55%, #f59e0b); font-size: 17px; }
+.logo-strip strong:nth-of-type(4)::before, .platform-support > div:nth-child(4) strong::before { content: "♪"; background: #111; text-shadow: -1px 0 #25f4ee, 1px 0 #fe2c55; font-size: 16px; }
 .marketing-section { width: min(1180px, calc(100% - 40px)); margin: auto; padding: 95px 0; }
 .section-intro { max-width: 640px; margin-bottom: 45px; }
 .section-intro h2, .split-feature h2, .cta-panel h2 { font-size: clamp(31px, 4vw, 48px); line-height: 1.05; letter-spacing: -.04em; }
@@ -343,6 +348,18 @@ html[data-theme="dark"] .story-preview { border-color: #39415a; box-shadow: 0 30
 .automation-flow strong, .automation-notes strong { display: block; margin-bottom: 7px; }
 .automation-flow p, .automation-notes p { margin: 0; font-size: 12px; }
 .automation-notes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 22px; margin-top: 24px; padding-top: 24px; border-top: 1px solid var(--border); }
+.social-automation-section { display: grid; grid-template-columns: 1fr 1fr; gap: 70px; align-items: center; padding-block: 80px; }
+.social-automation-copy h2 { font-size: clamp(31px, 4vw, 48px); line-height: 1.05; letter-spacing: -.04em; }
+.automation-checks { margin-bottom: 0; }
+.social-automation-panel { padding: 24px; border: 1px solid var(--border); border-radius: 16px; background: var(--card-gradient); box-shadow: 0 20px 55px #31426416; }
+.automation-pipeline { display: grid; gap: 4px; }
+.automation-pipeline article { display: flex; gap: 13px; padding: 13px 0; border-bottom: 1px solid var(--border-soft); }
+.automation-pipeline article > span { color: var(--blue); font-size: 10px; font-weight: 800; }
+.automation-pipeline strong { display: block; margin-bottom: 3px; }
+.automation-pipeline p { margin: 0; font-size: 12px; }
+.platform-support { display: grid; gap: 8px; margin: 18px 0; }
+.platform-support > div { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.platform-support strong { display: inline-flex; align-items: center; gap: 9px; font-size: 12px; }
 .split-feature { display: grid; grid-template-columns: 1fr 1fr; gap: 80px; align-items: center; }
 .check-list { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 28px 0 0; padding: 0; list-style: none; color: var(--text); font-size: 13px; }
 .check-list li::before { content: "✓"; margin-right: 8px; color: #7590ff; }
@@ -430,7 +447,7 @@ html[data-theme="dark"] .cta-panel { border-color: #3c4770; background: radial-g
   .storage-strip { grid-template-columns: 1fr; gap: 8px; }
   .filter-bar .button { width: 100%; }
   .marketing-nav nav > a:not(.button) { display: none; }
-  .hero, .split-feature, .creator-story { grid-template-columns: 1fr; gap: 45px; }
+  .hero, .split-feature, .creator-story, .social-automation-section { grid-template-columns: 1fr; gap: 45px; }
   .automation-heading { grid-template-columns: 1fr; gap: 14px; }
   .automation-flow { grid-template-columns: 1fr 1fr; }
   .hero { padding-top: 60px; }
