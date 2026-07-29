@@ -25,21 +25,31 @@ def _request(path: str, *, method: str = "GET", payload: dict | None = None) -> 
         data=body,
         headers={
             "Authorization": f"Bearer {secret}",
+            "Accept": "application/json",
             "Content-Type": "application/json",
+            "User-Agent": "my-automation-studio/1.0",
         },
         method=method,
     )
     try:
         with urllib.request.urlopen(request, timeout=30) as response:
             result = json.loads(response.read().decode("utf-8"))
-    except (urllib.error.URLError, json.JSONDecodeError) as exc:
-        detail = "Paystack could not complete the billing request."
-        if isinstance(exc, urllib.error.HTTPError):
-            try:
-                error = json.loads(exc.read().decode("utf-8"))
-                detail = str(error.get("message") or detail)
-            except (json.JSONDecodeError, UnicodeDecodeError):
-                pass
+    except urllib.error.HTTPError as exc:
+        detail = f"Paystack returned HTTP {exc.code}."
+        try:
+            error = json.loads(exc.read().decode("utf-8"))
+            detail = str(error.get("message") or detail)
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            pass
+        raise RuntimeError(detail) from exc
+    except urllib.error.URLError as exc:
+        reason = str(getattr(exc, "reason", "")).strip()
+        detail = "Could not reach Paystack. Please try again shortly."
+        if reason:
+            detail = f"Could not reach Paystack: {reason}"
+        raise RuntimeError(detail) from exc
+    except json.JSONDecodeError as exc:
+        detail = "Paystack returned an unreadable response. Please try again shortly."
         raise RuntimeError(detail) from exc
     if not result.get("status"):
         raise RuntimeError(str(result.get("message") or "Paystack rejected the request."))

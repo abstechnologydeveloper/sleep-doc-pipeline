@@ -62,7 +62,7 @@ def initialize() -> None:
                 role TEXT NOT NULL DEFAULT 'creator' CHECK(role IN ('admin', 'creator')),
                 plan TEXT NOT NULL DEFAULT 'free',
                 status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'suspended')),
-                monthly_job_limit INTEGER NOT NULL DEFAULT 2,
+                monthly_job_limit INTEGER NOT NULL DEFAULT 0,
                 max_minutes_per_job REAL NOT NULL DEFAULT 5,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
@@ -103,7 +103,6 @@ def initialize() -> None:
                 video_path TEXT,
                 script_path TEXT,
                 share_token TEXT,
-                showcase_visible BOOLEAN NOT NULL DEFAULT FALSE,
                 log_path TEXT,
                 error TEXT,
                 created_at TEXT NOT NULL,
@@ -232,7 +231,7 @@ def initialize() -> None:
             ALTER TABLE users ADD COLUMN IF NOT EXISTS creator_goal TEXT NOT NULL DEFAULT '';
             ALTER TABLE users ADD COLUMN IF NOT EXISTS next_job_number INTEGER NOT NULL DEFAULT 1;
             ALTER TABLE users ADD COLUMN IF NOT EXISTS storage_limit_bytes BIGINT NOT NULL DEFAULT 1073741824;
-            ALTER TABLE users ALTER COLUMN monthly_job_limit SET DEFAULT 2;
+            ALTER TABLE users ALTER COLUMN monthly_job_limit SET DEFAULT 0;
             ALTER TABLE users ALTER COLUMN max_minutes_per_job SET DEFAULT 5;
             ALTER TABLE jobs ADD COLUMN IF NOT EXISTS narration_voice TEXT NOT NULL DEFAULT 'Kore';
             ALTER TABLE jobs ADD COLUMN IF NOT EXISTS voice_direction TEXT NOT NULL DEFAULT 'neutral';
@@ -243,7 +242,6 @@ def initialize() -> None:
             ALTER TABLE jobs ADD COLUMN IF NOT EXISTS content_style TEXT NOT NULL DEFAULT 'cinematic';
             ALTER TABLE jobs ADD COLUMN IF NOT EXISTS creator_goal TEXT NOT NULL DEFAULT '';
             ALTER TABLE jobs ADD COLUMN IF NOT EXISTS youtube_privacy TEXT NOT NULL DEFAULT 'private';
-            ALTER TABLE jobs ADD COLUMN IF NOT EXISTS showcase_visible BOOLEAN NOT NULL DEFAULT FALSE;
             ALTER TABLE jobs ALTER COLUMN youtube_privacy SET DEFAULT 'public';
             ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS paystack_customer_code TEXT NOT NULL DEFAULT '';
             ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS payment_reference TEXT NOT NULL DEFAULT '';
@@ -281,6 +279,7 @@ def initialize() -> None:
     initialize_creator_job_numbers()
     initialize_plan_limits()
     initialize_free_plan_v2()
+    initialize_free_plan_no_creation()
     initialize_storage_limits()
     initialize_story_usage()
     ensure_configured_accounts()
@@ -359,6 +358,25 @@ def initialize_free_plan_v2() -> None:
             """UPDATE users SET monthly_job_limit=?, updated_at=?
             WHERE role='creator' AND plan='free'""",
             (plan_for("free").monthly_jobs, utc_now()),
+        )
+        db.execute(
+            "INSERT INTO app_migrations (name, applied_at) VALUES (?, ?)",
+            (migration, utc_now()),
+        )
+
+
+def initialize_free_plan_no_creation() -> None:
+    """Remove video creation from existing Free creator accounts once."""
+    with connect() as db:
+        migration = "free_plan_no_creation_v3"
+        if db.execute(
+            "SELECT 1 AS present FROM app_migrations WHERE name=?", (migration,)
+        ).fetchone():
+            return
+        db.execute(
+            """UPDATE users SET monthly_job_limit=0, updated_at=?
+            WHERE role='creator' AND plan='free'""",
+            (utc_now(),),
         )
         db.execute(
             "INSERT INTO app_migrations (name, applied_at) VALUES (?, ?)",
@@ -609,6 +627,8 @@ def create_story_job(
             return None, "Duration must be at least 0.5 minutes."
 
         if user["role"] != "admin":
+            if user["plan"] == "free":
+                return None, "Choose a paid plan before creating a video."
             if minutes > float(user["max_minutes_per_job"]):
                 return (
                     None,
@@ -774,7 +794,6 @@ def list_showcase_jobs(limit: int = 60):
             FROM jobs j
             JOIN users u ON u.id=j.owner_id
             WHERE j.kind='automatic'
-            AND j.showcase_visible=TRUE
             AND j.status IN ('completed', 'published', 'waiting_for_connections')
             AND j.video_path IS NOT NULL AND j.video_path != ''
             AND u.status='active'
@@ -791,7 +810,6 @@ def get_showcase_job(job_id: int):
             FROM jobs j
             JOIN users u ON u.id=j.owner_id
             WHERE j.id=? AND j.kind='automatic'
-            AND j.showcase_visible=TRUE
             AND j.status IN ('completed', 'published', 'waiting_for_connections')
             AND j.video_path IS NOT NULL AND j.video_path != ''
             AND u.status='active'""",
@@ -864,15 +882,6 @@ def set_job_share_token(job_id: int, token: str | None) -> None:
         db.execute(
             "UPDATE jobs SET share_token = ?, updated_at = ? WHERE id = ?",
             (token, utc_now(), job_id),
-        )
-
-
-def set_job_showcase_visibility(job_id: int, owner_id: int, visible: bool) -> None:
-    with connect() as db:
-        db.execute(
-            """UPDATE jobs SET showcase_visible=?, updated_at=?
-            WHERE id=? AND owner_id=?""",
-            (visible, utc_now(), job_id, owner_id),
         )
 
 

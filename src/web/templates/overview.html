@@ -1,8 +1,8 @@
 {% extends 'base.html' %}
 {% block content %}
 <div class="page-heading">
-  <div><p class="eyebrow">{{ 'Administration' if is_admin else 'Your workspace' }}</p><h1>{{ 'Dashboard' if is_admin else 'Welcome back' }}</h1><p>{{ 'See customers, videos, payments, and work that needs attention.' if is_admin else 'Create a new story video or continue with your recent work.' }}</p></div>
-  {% if is_admin %}<a class="button primary" href="/admin/customers">Manage customers</a>{% else %}<a class="button primary" href="/storytelling">Create story</a>{% endif %}
+  <div><p class="eyebrow">{{ 'Administration' if is_admin else 'Your workspace' }}</p><h1>{{ 'Dashboard' if is_admin else 'Welcome back' }}</h1><p>{{ 'See customers, videos, payments, and work that needs attention.' if is_admin else ('Explore your account, prepare your Video Recipe, and choose a plan when you are ready to create.' if current_user.plan == 'free' else 'Create a new story video or continue with your recent work.') }}</p></div>
+  {% if is_admin %}<a class="button primary" href="/admin/customers">Manage customers</a>{% elif current_user.plan == 'free' %}<a class="button primary" href="/pricing">Choose a plan</a>{% else %}<a class="button primary" href="/storytelling">Create story</a>{% endif %}
 </div>
 
 {% if not is_admin %}
@@ -10,7 +10,7 @@
   <div class="section-heading"><div><p class="eyebrow">Start here</p><h2>Three simple steps</h2><p>Complete these in order. You can change your choices at any time.</p></div><strong>{{ (1 if creator_setup.profile_complete else 0) + (1 if creator_setup.has_video else 0) + (1 if creator_setup.youtube_connected else 0) }} of 3 done</strong></div>
   <div class="setup-steps">
     <a class="setup-step {{ 'complete' if creator_setup.profile_complete else '' }}" href="/settings"><span>{{ '✓' if creator_setup.profile_complete else '1' }}</span><div><strong>Tell us what you make</strong><small>Choose your viewers, story type, picture look, and goal.</small></div><b>{{ 'Edit' if creator_setup.profile_complete else 'Start' }} →</b></a>
-    <a class="setup-step {{ 'complete' if creator_setup.has_video else '' }}" href="/storytelling"><span>{{ '✓' if creator_setup.has_video else '2' }}</span><div><strong>Make your first video</strong><small>Enter one idea and choose the length. We handle the rest.</small></div><b>{{ 'Create another' if creator_setup.has_video else 'Create' }} →</b></a>
+    <a class="setup-step {{ 'complete' if creator_setup.has_video else '' }}" href="{{ '/pricing' if current_user.plan == 'free' else '/storytelling' }}"><span>{{ '✓' if creator_setup.has_video else '2' }}</span><div><strong>{{ 'Choose a video plan' if current_user.plan == 'free' else 'Make your first video' }}</strong><small>{{ 'Video creation starts with a paid plan.' if current_user.plan == 'free' else 'Enter one idea and choose the length. We handle the rest.' }}</small></div><b>{{ 'See plans' if current_user.plan == 'free' else ('Create another' if creator_setup.has_video else 'Create') }} →</b></a>
     <a class="setup-step {{ 'complete' if creator_setup.youtube_connected else '' }}" href="{{ '/connections/youtube' if not creator_setup.youtube_connected else '/social' }}"><span>{{ '✓' if creator_setup.youtube_connected else '3' }}</span><div><strong>Connect YouTube when ready</strong><small>This is optional. You can always download your finished video.</small></div><b>{{ 'Publish' if creator_setup.youtube_connected else 'Connect' }} →</b></a>
   </div>
 </section>
