@@ -133,8 +133,9 @@ individual creators never enter application client credentials.
 
 Enable YouTube Data API v3 and register this redirect URI:
 `https://sleep-studio.69.197.164.87.nip.io/connections/youtube/callback`.
-Uploads default to private so creators can review them before publishing. YouTube
-quota, channel eligibility, and Google app verification still apply.
+Creators choose Public, Unlisted, or Private for each YouTube upload. Public is
+preselected. YouTube quota, channel
+eligibility, Google app verification, and upload-audit restrictions still apply.
 
 ### GitHub Actions deployment
 

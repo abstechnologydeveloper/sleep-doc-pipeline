@@ -238,6 +238,8 @@ def initialize() -> None:
             ALTER TABLE jobs ADD COLUMN IF NOT EXISTS creator_niche TEXT NOT NULL DEFAULT '';
             ALTER TABLE jobs ADD COLUMN IF NOT EXISTS target_audience TEXT NOT NULL DEFAULT '';
             ALTER TABLE jobs ADD COLUMN IF NOT EXISTS content_style TEXT NOT NULL DEFAULT 'cinematic';
+            ALTER TABLE jobs ADD COLUMN IF NOT EXISTS youtube_privacy TEXT NOT NULL DEFAULT 'private';
+            ALTER TABLE jobs ALTER COLUMN youtube_privacy SET DEFAULT 'public';
             ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS paystack_customer_code TEXT NOT NULL DEFAULT '';
             ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS payment_reference TEXT NOT NULL DEFAULT '';
             ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'paystack';
@@ -495,14 +497,15 @@ def create_job(**values) -> int:
         cursor = db.execute(
             """INSERT INTO jobs
             (owner_id, owner_job_number, kind, status, topic, minutes, title, description, hashtags,
-             platforms, scheduled_at, source_path, created_at, updated_at)
-            VALUES (?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id""",
+             platforms, scheduled_at, source_path, youtube_privacy, created_at, updated_at)
+            VALUES (?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id""",
             (
                 owner_id, owner_job_number, values["kind"],
                 values.get("topic"), values.get("minutes"),
                 values["title"], values.get("description", ""),
                 values.get("hashtags", ""), json.dumps(values["platforms"]),
-                values.get("scheduled_at"), values.get("source_path"), now, now,
+                values.get("scheduled_at"), values.get("source_path"),
+                values.get("youtube_privacy", "public"), now, now,
             ),
         )
         job_id = cursor.fetchone()["id"]
@@ -516,7 +519,8 @@ def create_job(**values) -> int:
 
 def queue_story_publication(
     *, job_id: int, owner_id: int, title: str, description: str,
-    hashtags: str, platforms: list[str], scheduled_at: str | None
+    hashtags: str, platforms: list[str], scheduled_at: str | None,
+    youtube_privacy: str
 ) -> bool:
     """Publish an existing generated story without creating a duplicate job."""
     now = utc_now()
@@ -533,10 +537,11 @@ def queue_story_publication(
             return False
         db.execute(
             """UPDATE jobs SET status='queued', title=?, description=?, hashtags=?,
-            platforms=?, scheduled_at=?, error=NULL, updated_at=? WHERE id=?""",
+            platforms=?, scheduled_at=?, youtube_privacy=?, error=NULL,
+            updated_at=? WHERE id=?""",
             (
                 title, description, hashtags, json.dumps(platforms),
-                scheduled_at, now, job_id,
+                scheduled_at, youtube_privacy, now, job_id,
             ),
         )
         for platform in platforms:

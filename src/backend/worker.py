@@ -283,7 +283,12 @@ def process_job(job) -> None:
                 return
 
             database.update_job(job["id"], "publishing", video_path=remote_video)
-            metadata = dict(title=job["title"], description=job["description"], hashtags=job["hashtags"])
+            metadata = dict(
+                title=job["title"],
+                description=job["description"],
+                hashtags=job["hashtags"],
+                youtube_privacy=job.get("youtube_privacy") or "public",
+            )
             waiting = False
             for platform in platforms:
                 if database.cancellation_requested(job["id"]):

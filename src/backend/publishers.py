@@ -220,7 +220,7 @@ def _upload_youtube(user_id: int, video_path: Path, metadata: dict) -> dict:
     if not connection:
         raise RuntimeError(REQUIREMENTS["youtube"])
     access_token = _refresh_youtube_access_token(user_id, connection)
-    privacy = os.getenv("YOUTUBE_PRIVACY_STATUS", "private").lower()
+    privacy = str(metadata.get("youtube_privacy") or "public").lower()
     if privacy not in {"private", "unlisted", "public"}:
         privacy = "private"
     description = "\n\n".join(

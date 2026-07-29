@@ -1224,6 +1224,9 @@ async def create_social_post(request: Request):
     platforms = [name for name in selected_platforms(form) if name == "youtube"]
     if not platforms:
         return render_social_page(request, "Connect YouTube and select it before publishing.", 400)
+    youtube_privacy = str(form.get("youtube_privacy", "public")).strip().lower()
+    if youtube_privacy not in {"public", "unlisted", "private"}:
+        return render_social_page(request, "Choose a valid YouTube visibility.", 400)
     try:
         scheduled_at = normalized_schedule(str(form.get("scheduled_at", "")))
     except ValueError:
@@ -1248,6 +1251,7 @@ async def create_social_post(request: Request):
             hashtags=hashtags,
             platforms=platforms,
             scheduled_at=scheduled_at,
+            youtube_privacy=youtube_privacy,
         ):
             return render_social_page(
                 request,
@@ -1265,6 +1269,7 @@ async def create_social_post(request: Request):
             platforms=platforms,
             scheduled_at=scheduled_at,
             source_path=video_reference,
+            youtube_privacy=youtube_privacy,
         )
     return RedirectResponse(f"/jobs/{job_id}", status_code=303)
 
