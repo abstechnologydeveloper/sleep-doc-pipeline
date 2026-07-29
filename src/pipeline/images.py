@@ -745,14 +745,6 @@ def main() -> None:
         image_stem = scene["id"]
         reused_scene_id = scene.get("reuse_scene_id")
         if reused_scene_id:
-            source_exists = any(
-                (image_dir / f"{reused_scene_id}{suffix}").is_file()
-                for suffix in (".jpg", ".jpeg", ".png")
-            )
-            if not source_exists:
-                raise RuntimeError(
-                    f"{image_stem} reuses {reused_scene_id}, but its image is missing."
-                )
             print(
                 f"  Scene {i}/{len(scene_entries)} reuses {reused_scene_id}; "
                 "no paid image request needed."
@@ -802,6 +794,19 @@ def main() -> None:
             for future in as_completed(futures):
                 completed_index = future.result()
                 print(f"  Scene {completed_index}/{len(scene_entries)} saved.")
+
+    for scene in scene_entries:
+        reused_scene_id = scene.get("reuse_scene_id")
+        if not reused_scene_id:
+            continue
+        source_exists = any(
+            (image_dir / f"{reused_scene_id}{suffix}").is_file()
+            for suffix in (".jpg", ".jpeg", ".png")
+        )
+        if not source_exists:
+            raise RuntimeError(
+                f"{scene['id']} reuses {reused_scene_id}, but its source image could not be created."
+            )
 
     existing_thumbnail = next(
         (

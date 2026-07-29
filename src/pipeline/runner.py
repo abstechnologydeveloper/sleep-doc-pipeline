@@ -68,6 +68,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--niche", default="", help="Creator niche guidance")
     parser.add_argument("--audience", default="", help="Target audience guidance")
+    parser.add_argument("--goal", default="", help="Creator outcome and publishing goal")
     parser.add_argument("--content-style", default="cinematic", help="Preferred visual style")
     parser.add_argument(
         "--max-images", type=int, default=None,
@@ -222,6 +223,8 @@ def main() -> None:
                 args.niche,
                 "--audience",
                 args.audience,
+                "--goal",
+                args.goal,
                 "--",
                 topic,
             ],

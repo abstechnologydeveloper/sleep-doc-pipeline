@@ -103,6 +103,7 @@ def run_automatic(job, log_file) -> Path:
         "--max-images", str(job.get("max_images") or 8),
         "--niche", job.get("creator_niche") or "",
         "--audience", job.get("target_audience") or "",
+        "--goal", job.get("creator_goal") or "",
         "--content-style", job.get("content_style") or "cinematic",
     ])
     process = subprocess.Popen(
@@ -240,6 +241,11 @@ def process_job(job) -> None:
                         hashtags=job["hashtags"] or "",
                         niche=job.get("creator_niche") or "",
                         audience=job.get("target_audience") or "",
+                        content_style=job.get("content_style") or "",
+                        creator_goal=job.get("creator_goal") or "",
+                        recent_ideas=database.recent_story_ideas(
+                            int(job["owner_id"]), int(job["id"])
+                        ),
                     )
                     if database.cancellation_requested(job["id"]):
                         raise JobCancelled

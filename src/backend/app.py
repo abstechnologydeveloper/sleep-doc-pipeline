@@ -210,7 +210,7 @@ def page_context(request: Request, section: str, **values) -> dict:
         "showcase": "Story Gallery",
         "social": "Publish",
         "notifications": "Updates",
-        "settings": "Account",
+        "settings": "Video Recipe",
         "subscription": "Subscription",
         "jobs": "My Videos",
         "customers": "Customers",
@@ -595,9 +595,10 @@ def verify_email_login(request: Request, background_tasks: BackgroundTasks, toke
     request.session.clear()
     request.session["user_id"] = int(user["id"])
     csrf_token(request)
-    if created:
+    new_creator = created and user["role"] == "creator"
+    if new_creator:
         background_tasks.add_task(send_welcome_email, str(user["email"]))
-    return RedirectResponse("/app", status_code=303)
+    return RedirectResponse("/settings?welcome=1" if new_creator else "/app", status_code=303)
 
 
 @app.get("/auth/google")
@@ -634,9 +635,10 @@ def google_callback(
     request.session.clear()
     request.session["user_id"] = int(user["id"])
     csrf_token(request)
-    if created:
+    new_creator = created and user["role"] == "creator"
+    if new_creator:
         background_tasks.add_task(send_welcome_email, str(user["email"]))
-    return RedirectResponse("/app", status_code=303)
+    return RedirectResponse("/settings?welcome=1" if new_creator else "/app", status_code=303)
 
 
 @app.post("/logout")
@@ -704,6 +706,8 @@ def dashboard(request: Request):
     if redirect:
         return redirect
     user_id, include_all = user_scope(request)
+    user = current_user(request)
+    connectors = [] if include_all else connector_statuses(user_id)
     counts = database.job_status_counts(user_id, include_all)
     summary = {
         "total": sum(counts.values()),
@@ -733,8 +737,19 @@ def dashboard(request: Request):
             summary=summary,
             jobs=database.list_jobs(limit=8, owner_id=user_id, include_all=include_all),
             media_items=reusable_media(request)[:4],
-            connectors=[] if include_all else connector_statuses(user_id),
-            storage_usage=None if include_all else creator_storage(current_user(request)),
+            connectors=connectors,
+            storage_usage=None if include_all else creator_storage(user),
+            creator_setup=None if include_all else {
+                "profile_complete": bool(
+                    str(user["creator_niche"]).strip()
+                    and str(user["target_audience"]).strip()
+                    and str(user["creator_goal"]).strip()
+                ),
+                "has_video": summary["total"] > 0,
+                "youtube_connected": any(
+                    item.name == "youtube" and item.configured for item in connectors
+                ),
+            },
         ),
     )
 
@@ -765,6 +780,11 @@ def storytelling_page(request: Request):
             voice_options=VOICE_OPTIONS,
             voice_directions=VOICE_DIRECTIONS,
             prompt_starters=prompt_starters(str(user["creator_niche"])),
+            profile_complete=bool(
+                str(user["creator_niche"]).strip()
+                and str(user["target_audience"]).strip()
+                and str(user["creator_goal"]).strip()
+            ),
         ),
     )
 
@@ -856,6 +876,11 @@ def settings_page(request: Request):
             current_plan=PLANS.get(user["plan"], PLANS["free"]),
             niche_options=NICHE_OPTIONS,
             content_styles=CONTENT_STYLES,
+            profile_complete=bool(
+                str(user["creator_niche"]).strip()
+                and str(user["target_audience"]).strip()
+                and str(user["creator_goal"]).strip()
+            ),
         ),
     )
 
@@ -910,6 +935,10 @@ def update_settings(
         return HTMLResponse("Enter a story type using 120 characters or fewer", status_code=400)
     if not content_style.strip() or len(content_style.strip()) > 120:
         return HTMLResponse("Enter a picture style using 120 characters or fewer", status_code=400)
+    if not target_audience.strip() or len(target_audience.strip()) > 160:
+        return HTMLResponse("Describe your viewers using 160 characters or fewer", status_code=400)
+    if not creator_goal.strip() or len(creator_goal.strip()) > 300:
+        return HTMLResponse("Describe your video goal using 300 characters or fewer", status_code=400)
     if not 0.5 <= default_story_minutes <= float(user["max_minutes_per_job"]):
         return HTMLResponse("Default duration exceeds your plan limit", status_code=400)
     database.update_creator_settings(

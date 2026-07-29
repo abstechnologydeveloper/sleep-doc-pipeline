@@ -19,6 +19,9 @@ def generate_post_metadata(
     hashtags: str = "",
     niche: str = "",
     audience: str = "",
+    content_style: str = "",
+    creator_goal: str = "",
+    recent_ideas: list[str] | None = None,
 ) -> dict[str, str]:
     """Fill missing concept and post fields while preserving supplied values."""
     supplied = {
@@ -33,12 +36,15 @@ def generate_post_metadata(
     api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
     if not api_key:
         raise RuntimeError("GEMINI_API_KEY is required for automatic post generation")
+    recent_idea_lines = "\n".join(
+        f"- {idea}" for idea in (recent_ideas or [])
+    ) or "- None yet"
 
-    prompt = f"""Create the missing fields for one original sleep-story video.
-The concept must be easy to understand, fun to follow, calm enough for bedtime, and suitable
-for a storytelling YouTube channel. Give it a clear character, goal, curiosity hook, and a few
+    prompt = f"""Create the missing fields for one original storytelling video.
+The concept must be easy to understand, fun to follow, and suitable for the creator's stated
+audience and goal. Give it a clear character, goal, curiosity hook, and a few
 small discoveries instead of relying only on atmosphere. It may be playful, cozy, historical,
-mysterious, gently eerie, for children, or for adults, but never graphic, loud, childish when
+mysterious, gently eerie, for children, or for adults, but never graphic, childish when
 the audience is adult, or based closely on an existing copyrighted story.
 The central problem, title promise, thumbnail idea, and eventual resolution must describe the
 same story. Prefer a premise with a natural cause-and-effect journey, a meaningful choice, and
@@ -53,7 +59,17 @@ Existing values must be preserved when present:
 Creator profile guidance:
 - niche: {niche or 'general storytelling'}
 - target audience: {audience or 'a general storytelling audience'}
+- preferred picture style: {content_style or 'choose what fits the story'}
+- creator's goal: {creator_goal or 'make an enjoyable original video'}
 Use this guidance when generating missing fields, but do not mention the profile itself.
+
+This creator's recent ideas are listed below. Do not repeat their central character, character
+name, setting, object, mystery, title pattern, opening event, or ending. If the list is empty,
+still avoid stock AI defaults such as Ella, Luna, Lily, Maya, Leo, Oliver, Finn, or Pip, and
+avoid defaulting to whispering lights, glowing forests, forgotten towns, magical clocks, or
+fallen stars unless the creator explicitly asks for them.
+Recent ideas:
+{recent_idea_lines}
 
 Return one JSON object with string fields named topic, title, description, and hashtags.
 The topic should be one specific story premise written in plain everyday English. The title

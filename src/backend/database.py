@@ -241,6 +241,7 @@ def initialize() -> None:
             ALTER TABLE jobs ADD COLUMN IF NOT EXISTS creator_niche TEXT NOT NULL DEFAULT '';
             ALTER TABLE jobs ADD COLUMN IF NOT EXISTS target_audience TEXT NOT NULL DEFAULT '';
             ALTER TABLE jobs ADD COLUMN IF NOT EXISTS content_style TEXT NOT NULL DEFAULT 'cinematic';
+            ALTER TABLE jobs ADD COLUMN IF NOT EXISTS creator_goal TEXT NOT NULL DEFAULT '';
             ALTER TABLE jobs ADD COLUMN IF NOT EXISTS youtube_privacy TEXT NOT NULL DEFAULT 'private';
             ALTER TABLE jobs ADD COLUMN IF NOT EXISTS showcase_visible BOOLEAN NOT NULL DEFAULT FALSE;
             ALTER TABLE jobs ALTER COLUMN youtube_privacy SET DEFAULT 'public';
@@ -636,9 +637,9 @@ def create_story_job(
             """INSERT INTO jobs
             (owner_id, owner_job_number, kind, status, topic, minutes, title, description, hashtags,
              platforms, scheduled_at, source_path, narration_voice, voice_direction, max_images,
-             creator_niche, target_audience, content_style,
+             creator_niche, target_audience, content_style, creator_goal,
              created_at, updated_at)
-            VALUES (?, ?, 'automatic', 'queued', ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, 'automatic', 'queued', ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             RETURNING id""",
             (
                 owner_id,
@@ -656,6 +657,7 @@ def create_story_job(
                 user["creator_niche"],
                 user["target_audience"],
                 user["content_style"],
+                user["creator_goal"],
                 now,
                 now,
             ),
@@ -675,6 +677,28 @@ def create_story_job(
                 (job_id, platform, now),
             )
         return job_id, None
+
+
+def recent_story_ideas(user_id: int, exclude_job_id: int, limit: int = 6) -> list[str]:
+    """Return only this creator's recent concepts to reduce accidental repetition."""
+    with connect() as db:
+        rows = db.execute(
+            """SELECT topic, title FROM jobs
+            WHERE owner_id=? AND kind='automatic' AND id!=?
+            ORDER BY id DESC LIMIT ?""",
+            (user_id, exclude_job_id, limit),
+        ).fetchall()
+    ideas = []
+    for row in rows:
+        parts = [
+            value for value in (
+                str(row["title"] or "").strip(),
+                str(row["topic"] or "").strip(),
+            ) if value
+        ]
+        if parts:
+            ideas.append(" — ".join(parts))
+    return ideas
 
 
 def create_uploaded_media(

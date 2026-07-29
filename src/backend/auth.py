@@ -77,7 +77,7 @@ def send_welcome_email(email: str) -> None:
     sender = os.getenv("AUTH_FROM_EMAIL", "").strip()
     if not api_key or not sender:
         return
-    workspace_url = f"{public_base_url()}/storytelling"
+    workspace_url = f"{public_base_url()}/settings?welcome=1"
     payload = json.dumps(
         {
             "from": sender,
@@ -95,7 +95,7 @@ def send_welcome_email(email: str) -> None:
                 "<ol><li>Enter your story idea.</li><li>Choose the video length, "
                 "picture style, and voice.</li><li>Start the job and return when "
                 "your video is ready.</li></ol>"
-                f'<p><a href="{workspace_url}">Open your creator workspace</a></p>'
+                f'<p><a href="{workspace_url}">Set up your video recipe</a></p>'
                 "<p>We are glad to have you here.</p>"
             ),
         }
