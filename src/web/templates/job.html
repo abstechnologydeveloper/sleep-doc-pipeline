@@ -43,6 +43,30 @@
   </aside>
 </div>
 
+{% if not is_admin and job.status in ['completed','published','waiting_for_connections'] %}
+<section class="panel feedback-panel">
+  <div class="section-heading"><div><h2>Rate this video</h2><p>Your feedback helps us improve future videos.</p></div></div>
+  {% if request.query_params.get('feedback') == 'saved' %}<div class="alert success">Thank you. Your rating was saved.</div>{% endif %}
+  <form method="post" action="/jobs/{{ job.id }}/feedback" class="studio-form">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <fieldset class="rating-field"><legend>How would you rate the finished video?</legend><div class="star-rating">
+      {% for score in range(5, 0, -1) %}<input id="rating-{{ job.id }}-{{ score }}" type="radio" name="rating" value="{{ score }}" {{ 'checked' if feedback and feedback.rating == score else '' }} required><label for="rating-{{ job.id }}-{{ score }}" title="{{ score }} stars">★</label>{% endfor %}
+    </div></fieldset>
+    <label>Tell us what worked or what should improve<textarea name="comment" maxlength="600" required placeholder="For example: the pictures matched the story, but I would like a slower voice.">{{ feedback.comment if feedback else '' }}</textarea><span>Required. Please do not include private information.</span></label>
+    <label>Name to show publicly<input name="public_display_name" maxlength="60" value="{{ feedback.public_display_name if feedback else '' }}" placeholder="For example: Ada, Story Creator"><span>Leave this empty to show “Sleep Studio creator”.</span></label>
+    <label class="check"><input type="checkbox" name="public_consent" value="yes" {{ 'checked' if feedback and feedback.public_consent else '' }}><span>Sleep Studio may show my rating and comment on its public website.</span></label>
+    {% if feedback and feedback.public_consent %}<p class="form-note">Public comments are reviewed before they appear on the landing page. Editing this feedback sends it for review again.</p>{% endif %}
+    <button class="button primary" type="submit">Save my rating</button>
+  </form>
+</section>
+{% elif is_admin and feedback %}
+<section class="panel feedback-panel">
+  <div class="section-heading"><div><h2>Creator feedback</h2><p>Review consent and the comment before publishing it on the landing page.</p></div><span class="status {{ 'status-completed' if feedback.approved else 'status-pending' }}">{{ 'Public' if feedback.approved else 'Not public' }}</span></div>
+  <div class="feedback-review"><div class="testimonial-stars" aria-label="{{ feedback.rating }} out of 5 stars">{% for score in range(1, 6) %}<span class="{{ 'empty' if score > feedback.rating else '' }}">★</span>{% endfor %}</div><p>{{ feedback.comment or 'The creator left a star rating without a written comment.' }}</p><small>Display name: {{ feedback.public_display_name or 'Sleep Studio creator' }} · Public permission: {{ 'Yes' if feedback.public_consent else 'No' }}</small></div>
+  <form method="post" action="/admin/jobs/{{ job.id }}/feedback-approval" class="action-row"><input type="hidden" name="csrf" value="{{ csrf }}">{% if feedback.approved %}<input type="hidden" name="approved" value="no"><button class="button secondary" type="submit">Remove from landing page</button>{% else %}<input type="hidden" name="approved" value="yes"><button class="button primary" type="submit" {{ 'disabled' if not feedback.public_consent or not feedback.comment else '' }}>Approve for landing page</button>{% endif %}</form>
+</section>
+{% endif %}
+
 <div class="content-grid job-layout">
   <section class="panel span-two">
     <div class="section-heading"><div><h2>Publishing</h2><p>See whether this video was sent to your channel.</p></div></div>

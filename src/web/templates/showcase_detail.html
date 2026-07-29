@@ -1,0 +1,12 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="breadcrumbs"><a href="/showcase">Story Gallery</a><span>/</span><span>Watch</span></div>
+<div class="page-heading">
+  <div><p class="eyebrow">Creator story</p><h1>{{ job.title or 'Untitled story' }}</h1><p>Made by {{ job.creator_name }}</p></div>
+  <a class="button secondary" href="/showcase">Back to gallery</a>
+</div>
+<section class="panel showcase-player">
+  <video class="video-player" controls preload="metadata" poster="/showcase/{{ job.id }}/thumbnail" src="/showcase/{{ job.id }}/video"></video>
+  {% if job.description %}<p>{{ job.description }}</p>{% endif %}
+</section>
+{% endblock %}

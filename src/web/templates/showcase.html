@@ -1,0 +1,21 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="page-heading">
+  <div><p class="eyebrow">Story Gallery</p><h1>See what other creators have made</h1><p>Watch finished story videos for ideas and inspiration. New finished stories appear here automatically.</p></div>
+  <a class="button primary" href="/storytelling">Create your video</a>
+</div>
+
+<div class="showcase-grid">
+{% for item in showcase_items %}
+  <article class="showcase-card">
+    <a class="showcase-cover" href="/showcase/{{ item.id }}">
+      {% if item.thumbnail_ready %}<img src="/showcase/{{ item.id }}/thumbnail" alt="Thumbnail for {{ item.title }}" loading="lazy">{% else %}<span>Watch story</span>{% endif %}
+      <i>▶</i>
+    </a>
+    <div class="showcase-copy"><strong><a href="/showcase/{{ item.id }}">{{ item.title or 'Untitled story' }}</a></strong><small>By {{ item.creator_name }}</small>{% if item.minutes %}<small>{{ item.minutes }} minute story</small>{% endif %}</div>
+  </article>
+{% else %}
+  <div class="empty-panel"><strong>No stories are ready yet.</strong><br>Finished creator stories will appear here automatically.</div>
+{% endfor %}
+</div>
+{% endblock %}

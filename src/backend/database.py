@@ -191,6 +191,20 @@ def initialize() -> None:
                 detail TEXT NOT NULL DEFAULT '',
                 created_at TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS job_feedback (
+                id BIGSERIAL PRIMARY KEY,
+                job_id BIGINT NOT NULL UNIQUE REFERENCES jobs(id) ON DELETE CASCADE,
+                user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                rating INTEGER NOT NULL CHECK(rating BETWEEN 1 AND 5),
+                comment TEXT NOT NULL DEFAULT '',
+                public_display_name TEXT NOT NULL DEFAULT '',
+                public_consent BOOLEAN NOT NULL DEFAULT FALSE,
+                approved BOOLEAN NOT NULL DEFAULT FALSE,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS job_feedback_public
+            ON job_feedback(approved, public_consent, updated_at);
             """
         )
         db.executescript(
@@ -623,6 +637,38 @@ def list_media_jobs(
         ).fetchall()
 
 
+def list_showcase_jobs(limit: int = 60):
+    """Return finished generated stories for the signed-in creator gallery."""
+    with connect() as db:
+        return db.execute(
+            """SELECT j.*, COALESCE(NULLIF(u.channel_name, ''), NULLIF(u.name, ''),
+            'Sleep Studio creator') AS creator_name
+            FROM jobs j
+            JOIN users u ON u.id=j.owner_id
+            WHERE j.kind='automatic'
+            AND j.status IN ('completed', 'published', 'waiting_for_connections')
+            AND j.video_path IS NOT NULL AND j.video_path != ''
+            AND u.status='active'
+            ORDER BY j.updated_at DESC LIMIT ?""",
+            (limit,),
+        ).fetchall()
+
+
+def get_showcase_job(job_id: int):
+    with connect() as db:
+        return db.execute(
+            """SELECT j.*, COALESCE(NULLIF(u.channel_name, ''), NULLIF(u.name, ''),
+            'Sleep Studio creator') AS creator_name
+            FROM jobs j
+            JOIN users u ON u.id=j.owner_id
+            WHERE j.id=? AND j.kind='automatic'
+            AND j.status IN ('completed', 'published', 'waiting_for_connections')
+            AND j.video_path IS NOT NULL AND j.video_path != ''
+            AND u.status='active'""",
+            (job_id,),
+        ).fetchone()
+
+
 def list_local_media_jobs(limit: int = 20):
     with connect() as db:
         return db.execute(
@@ -689,6 +735,56 @@ def set_job_share_token(job_id: int, token: str | None) -> None:
             "UPDATE jobs SET share_token = ?, updated_at = ? WHERE id = ?",
             (token, utc_now(), job_id),
         )
+
+
+def get_job_feedback(job_id: int):
+    with connect() as db:
+        return db.execute(
+            "SELECT * FROM job_feedback WHERE job_id = ?", (job_id,)
+        ).fetchone()
+
+
+def save_job_feedback(
+    *, job_id: int, user_id: int, rating: int, comment: str,
+    public_display_name: str, public_consent: bool,
+) -> None:
+    now = utc_now()
+    with connect() as db:
+        db.execute(
+            """INSERT INTO job_feedback
+            (job_id, user_id, rating, comment, public_display_name,
+             public_consent, approved, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, FALSE, ?, ?)
+            ON CONFLICT(job_id) DO UPDATE SET
+                rating=EXCLUDED.rating,
+                comment=EXCLUDED.comment,
+                public_display_name=EXCLUDED.public_display_name,
+                public_consent=EXCLUDED.public_consent,
+                approved=FALSE,
+                updated_at=EXCLUDED.updated_at
+            WHERE job_feedback.user_id=EXCLUDED.user_id""",
+            (job_id, user_id, rating, comment, public_display_name,
+             public_consent, now, now),
+        )
+
+
+def set_job_feedback_approved(job_id: int, approved: bool) -> None:
+    with connect() as db:
+        db.execute(
+            "UPDATE job_feedback SET approved=?, updated_at=? WHERE job_id=?",
+            (approved, utc_now(), job_id),
+        )
+
+
+def list_public_testimonials(limit: int = 6):
+    with connect() as db:
+        return db.execute(
+            """SELECT rating, comment, public_display_name
+            FROM job_feedback
+            WHERE approved=TRUE AND public_consent=TRUE AND comment != ''
+            ORDER BY updated_at DESC LIMIT ?""",
+            (limit,),
+        ).fetchall()
 
 
 def get_or_create_user(
@@ -1327,9 +1423,16 @@ def user_export(user_id: int) -> dict:
             FROM payment_attempts WHERE user_id=? ORDER BY created_at""",
             (user_id,),
         ).fetchall()
+        feedback = db.execute(
+            """SELECT job_id, rating, comment, public_display_name, public_consent,
+            approved, created_at, updated_at FROM job_feedback
+            WHERE user_id=? ORDER BY created_at""",
+            (user_id,),
+        ).fetchall()
         return {"account": dict(user) if user else {},
                 "jobs": [dict(row) for row in jobs],
-                "payments": [dict(row) for row in payments]}
+                "payments": [dict(row) for row in payments],
+                "feedback": [dict(row) for row in feedback]}
 
 
 def delete_creator(user_id: int) -> None:

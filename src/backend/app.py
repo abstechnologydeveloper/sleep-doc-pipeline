@@ -73,6 +73,29 @@ JOB_STATUSES = (
 )
 SHAREABLE_STATUSES = {"completed", "published", "waiting_for_connections"}
 MAX_ACTIVE_CREATOR_JOBS = 1
+EXAMPLE_TESTIMONIALS = (
+    {
+        "rating": 5,
+        "comment": "The pictures followed my story well, and having the voice, captions, and video made together saved me time.",
+        "public_display_name": "Anonymous story creator",
+        "avatar_letter": "S",
+        "is_example": True,
+    },
+    {
+        "rating": 5,
+        "comment": "I started with a short idea and received a complete video I could watch and download.",
+        "public_display_name": "Anonymous YouTube creator",
+        "avatar_letter": "Y",
+        "is_example": True,
+    },
+    {
+        "rating": 5,
+        "comment": "The steps were easy to understand. I did not need video-editing experience to begin.",
+        "public_display_name": "Anonymous first-time creator",
+        "avatar_letter": "F",
+        "is_example": True,
+    },
+)
 
 
 @asynccontextmanager
@@ -454,12 +477,21 @@ def logout(request: Request, csrf: str = Form()):
 @app.get("/", response_class=HTMLResponse)
 def landing(request: Request):
     base_url = public_base_url() or str(request.base_url).rstrip("/")
+    testimonials = [dict(row) for row in database.list_public_testimonials(limit=3)]
+    for testimonial in testimonials:
+        testimonial["avatar_letter"] = str(
+            testimonial["public_display_name"] or "S"
+        )[0].upper()
+        testimonial["is_example"] = False
+    if len(testimonials) < 3:
+        testimonials.extend(EXAMPLE_TESTIMONIALS[:3 - len(testimonials)])
     return TEMPLATES.TemplateResponse(
         request,
         "landing.html",
         {
             "current_user": current_user(request),
             "plans": PLANS.values(),
+            "testimonials": testimonials,
             "landing_url": f"{base_url}/",
             "preview_url": f"{base_url}/social-preview.png",
         },
@@ -557,6 +589,61 @@ def storytelling_page(request: Request):
             prompt_starters=prompt_starters(str(user["creator_niche"])),
         ),
     )
+
+
+@app.get("/showcase", response_class=HTMLResponse)
+def showcase_page(request: Request):
+    redirect = creator_required(request)
+    if redirect:
+        return redirect
+    items = []
+    for row in database.list_showcase_jobs():
+        item = dict(row)
+        item["thumbnail_ready"] = thumbnail_available(row)
+        items.append(item)
+    return TEMPLATES.TemplateResponse(
+        request,
+        "showcase.html",
+        page_context(request, "showcase", showcase_items=items),
+    )
+
+
+@app.get("/showcase/{job_id}", response_class=HTMLResponse)
+def showcase_detail(request: Request, job_id: int):
+    redirect = creator_required(request)
+    if redirect:
+        return redirect
+    job = database.get_showcase_job(job_id)
+    if not job:
+        return HTMLResponse("Story not found", status_code=404)
+    return TEMPLATES.TemplateResponse(
+        request,
+        "showcase_detail.html",
+        page_context(request, "showcase", job=job),
+    )
+
+
+@app.get("/showcase/{job_id}/video")
+def showcase_video(request: Request, job_id: int):
+    redirect = creator_required(request)
+    if redirect:
+        return redirect
+    job = database.get_showcase_job(job_id)
+    if not job:
+        return HTMLResponse("Video not available", status_code=404)
+    return media_response(request, str(job["video_path"]), "video/mp4")
+
+
+@app.get("/showcase/{job_id}/thumbnail")
+def showcase_thumbnail(request: Request, job_id: int):
+    redirect = creator_required(request)
+    if redirect:
+        return redirect
+    job = database.get_showcase_job(job_id)
+    thumbnail = thumbnail_reference(job)
+    if not job or thumbnail is None or not storage.available(str(thumbnail)):
+        return HTMLResponse("Thumbnail not available", status_code=404)
+    return media_response(request, str(thumbnail), "image/jpeg")
 
 
 @app.get("/settings", response_class=HTMLResponse)
@@ -1089,6 +1176,7 @@ def job_detail(request: Request, job_id: int):
             "jobs",
             job=job,
             publications=publications,
+            feedback=database.get_job_feedback(job_id),
             thumbnail_ready=thumbnail_available(job),
             shareable=shareable_job(job),
             share_url=(
@@ -1098,6 +1186,74 @@ def job_detail(request: Request, job_id: int):
             ),
         ),
     )
+
+
+@app.post("/jobs/{job_id}/feedback")
+def save_job_feedback(
+    request: Request,
+    job_id: int,
+    rating: int = Form(),
+    comment: str = Form(""),
+    public_display_name: str = Form(""),
+    public_consent: str = Form(""),
+    csrf: str = Form(),
+):
+    redirect = creator_required(request)
+    if redirect:
+        return redirect
+    verify_csrf(request, csrf)
+    job, _ = owned_job(request, job_id)
+    user = current_user(request)
+    if not job or int(job["owner_id"]) != int(user["id"]):
+        return HTMLResponse("Video not found", status_code=404)
+    if job["status"] not in SHAREABLE_STATUSES:
+        return HTMLResponse("You can rate a video after it is finished.", status_code=409)
+    clean_comment = comment.strip()
+    clean_name = public_display_name.strip()
+    if rating not in range(1, 6):
+        return HTMLResponse("Choose a rating from 1 to 5 stars.", status_code=400)
+    if not clean_comment:
+        return HTMLResponse("Write a short comment with your rating.", status_code=400)
+    if len(clean_comment) > 600 or len(clean_name) > 60:
+        return HTMLResponse("Your feedback or display name is too long.", status_code=400)
+    database.save_job_feedback(
+        job_id=job_id,
+        user_id=int(user["id"]),
+        rating=rating,
+        comment=clean_comment,
+        public_display_name=clean_name,
+        public_consent=public_consent == "yes",
+    )
+    database.record_audit(
+        int(user["id"]), "job.feedback_saved", "job", str(job_id),
+        f"rating={rating}; public={public_consent == 'yes'}",
+    )
+    return RedirectResponse(f"/jobs/{job_id}?feedback=saved", status_code=303)
+
+
+@app.post("/admin/jobs/{job_id}/feedback-approval")
+def approve_job_feedback(
+    request: Request,
+    job_id: int,
+    approved: str = Form("no"),
+    csrf: str = Form(),
+):
+    redirect = admin_required(request)
+    if redirect:
+        return redirect
+    verify_csrf(request, csrf)
+    job, _ = owned_job(request, job_id)
+    feedback = database.get_job_feedback(job_id)
+    if not job or not feedback:
+        return HTMLResponse("Feedback not found", status_code=404)
+    is_approved = approved == "yes" and bool(feedback["public_consent"])
+    database.set_job_feedback_approved(job_id, is_approved)
+    administrator = current_user(request)
+    database.record_audit(
+        int(administrator["id"]), "job.feedback_moderated", "job", str(job_id),
+        f"approved={is_approved}",
+    )
+    return RedirectResponse(f"/jobs/{job_id}?feedback=moderated", status_code=303)
 
 
 @app.post("/jobs/{job_id}/share")
