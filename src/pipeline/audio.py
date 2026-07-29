@@ -386,10 +386,28 @@ def main() -> None:
     pending_chunks = collect_pending_chunks(chunks, chunk_dir)
     print(f"Narration voice: {args.voice}")
     print(f"Voice direction: {args.voice_direction}")
-    generate_pending_chunks(
-        client, pending_chunks, len(chunks), args.workers,
-        args.voice, args.voice_direction,
-    )
+    try:
+        generate_pending_chunks(
+            client, pending_chunks, len(chunks), args.workers,
+            args.voice, args.voice_direction,
+        )
+    except RuntimeError:
+        if args.voice == DEFAULT_VOICE and args.voice_direction == "neutral":
+            raise
+        print(
+            f"Narrator {args.voice} could not complete the narration. "
+            f"Regenerating every part with {DEFAULT_VOICE}."
+        )
+        for chunk_path in chunk_dir.glob("chunk_*.wav"):
+            chunk_path.unlink(missing_ok=True)
+        generate_pending_chunks(
+            client,
+            collect_pending_chunks(chunks, chunk_dir),
+            len(chunks),
+            1,
+            DEFAULT_VOICE,
+            "neutral",
+        )
 
     # Stitch all chunk files together into the final audio file.
     print("\nAll chunks ready. Stitching into final audio file...")
