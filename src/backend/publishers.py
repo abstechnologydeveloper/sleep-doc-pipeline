@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib import error, parse, request
-
 from cryptography.fernet import Fernet, InvalidToken
 
 from . import database
