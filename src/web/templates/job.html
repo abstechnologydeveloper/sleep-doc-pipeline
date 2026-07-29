@@ -7,7 +7,7 @@
   <span class="status status-{{ job.status }}" data-job-detail-status>{{ job.status|friendly_status }}</span>
 </div>
 
-{% if job.error %}<div class="alert error"><strong>We could not finish this video.</strong><span>{% if is_admin %}{{ job.error }}{% else %}Please try again. If it still fails, contact support and mention video #{{ job.owner_job_number or job.id }}.{% endif %}</span></div>{% endif %}
+{% if job.error %}<div class="alert error"><strong>We could not finish this video.</strong><span>{% if is_admin or job.error.startswith('Storage is full.') %}{{ job.error }}{% else %}Please try again. If it still fails, contact support and mention video #{{ job.owner_job_number or job.id }}.{% endif %}</span></div>{% endif %}
 
 <div class="content-grid job-layout">
   <section class="panel span-two">

@@ -12,6 +12,7 @@ from .plans import plan_for
 
 
 LEGACY_DATABASE_PATH = DATA_DIR / "admin.sqlite3"
+BYTES_PER_GB = 1024 ** 3
 
 
 class ConnectionAdapter:
@@ -191,6 +192,14 @@ def initialize() -> None:
                 detail TEXT NOT NULL DEFAULT '',
                 created_at TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS media_assets (
+                reference TEXT PRIMARY KEY,
+                owner_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                size_bytes BIGINT NOT NULL CHECK(size_bytes >= 0),
+                kind TEXT NOT NULL CHECK(kind IN ('video', 'thumbnail', 'upload')),
+                created_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS media_assets_owner ON media_assets(owner_id);
             CREATE TABLE IF NOT EXISTS job_feedback (
                 id BIGSERIAL PRIMARY KEY,
                 job_id BIGINT NOT NULL UNIQUE REFERENCES jobs(id) ON DELETE CASCADE,
@@ -219,6 +228,7 @@ def initialize() -> None:
             ALTER TABLE users ADD COLUMN IF NOT EXISTS content_style TEXT NOT NULL DEFAULT 'cinematic';
             ALTER TABLE users ADD COLUMN IF NOT EXISTS creator_goal TEXT NOT NULL DEFAULT '';
             ALTER TABLE users ADD COLUMN IF NOT EXISTS next_job_number INTEGER NOT NULL DEFAULT 1;
+            ALTER TABLE users ADD COLUMN IF NOT EXISTS storage_limit_bytes BIGINT NOT NULL DEFAULT 1073741824;
             ALTER TABLE users ALTER COLUMN max_minutes_per_job SET DEFAULT 5;
             ALTER TABLE jobs ADD COLUMN IF NOT EXISTS narration_voice TEXT NOT NULL DEFAULT 'Kore';
             ALTER TABLE jobs ADD COLUMN IF NOT EXISTS max_images INTEGER NOT NULL DEFAULT 8;
@@ -259,6 +269,7 @@ def initialize() -> None:
     import_legacy_sqlite()
     initialize_creator_job_numbers()
     initialize_plan_limits()
+    initialize_storage_limits()
     initialize_story_usage()
     ensure_configured_accounts()
 
@@ -321,6 +332,28 @@ def initialize_plan_limits() -> None:
         db.execute(
             "INSERT INTO app_migrations (name, applied_at) VALUES (?, ?)",
             ("commercial_plan_limits_v1", utc_now()),
+        )
+
+
+def initialize_storage_limits() -> None:
+    """Apply storage allowances without changing administrator custom limits later."""
+    with connect() as db:
+        applied = db.execute(
+            "SELECT 1 AS present FROM app_migrations WHERE name=?",
+            ("commercial_storage_limits_v1",),
+        ).fetchone()
+        if applied:
+            return
+        for key in ("free", "basic", "pro", "studio"):
+            plan = plan_for(key)
+            db.execute(
+                """UPDATE users SET storage_limit_bytes=?, updated_at=?
+                WHERE role='creator' AND plan=?""",
+                (plan.storage_gb * BYTES_PER_GB, utc_now(), key),
+            )
+        db.execute(
+            "INSERT INTO app_migrations (name, applied_at) VALUES (?, ?)",
+            ("commercial_storage_limits_v1", utc_now()),
         )
 
 
@@ -847,9 +880,10 @@ def get_user(user_id: int):
             )
             db.execute(
                 """UPDATE users SET plan=?, monthly_job_limit=?, max_minutes_per_job=?,
-                max_images_per_job=?, updated_at=? WHERE id=? AND role='creator'""",
+                max_images_per_job=?, storage_limit_bytes=?, updated_at=?
+                WHERE id=? AND role='creator'""",
                 (free.key, free.monthly_jobs, free.max_minutes, free.max_images,
-                 utc_now(), user_id),
+                 free.storage_gb * BYTES_PER_GB, utc_now(), user_id),
             )
         return db.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
 
@@ -932,6 +966,8 @@ def list_users():
             COUNT(j.id) AS total_jobs,
             (SELECT COUNT(*) FROM story_usage su WHERE su.user_id=u.id
              AND su.outcome!='released' AND su.created_at>=?) AS monthly_jobs,
+            (SELECT COALESCE(SUM(ma.size_bytes), 0) FROM media_assets ma
+             WHERE ma.owner_id=u.id) AS storage_used_bytes,
             SUM(CASE WHEN j.status IN ('queued','processing','publishing') THEN 1 ELSE 0 END) AS active_jobs
             FROM users u
             LEFT JOIN subscriptions s ON s.user_id=u.id
@@ -943,15 +979,16 @@ def list_users():
 
 def update_user_limits(
     user_id: int, *, plan: str, monthly_job_limit: int,
-    max_minutes_per_job: float, max_images_per_job: int, status: str
+    max_minutes_per_job: float, max_images_per_job: int,
+    storage_limit_bytes: int, status: str
 ) -> None:
     with connect() as db:
         db.execute(
             """UPDATE users SET plan=?, monthly_job_limit=?, max_minutes_per_job=?,
-            max_images_per_job=?, status=?, updated_at=?
+            max_images_per_job=?, storage_limit_bytes=?, status=?, updated_at=?
             WHERE id=? AND role='creator'""",
             (plan, monthly_job_limit, max_minutes_per_job, max_images_per_job,
-             status, utc_now(), user_id),
+             storage_limit_bytes, status, utc_now(), user_id),
         )
 
 
@@ -1062,9 +1099,11 @@ def activate_paystack_payment(
         )
         db.execute(
             """UPDATE users SET paystack_customer_code=?, plan=?, monthly_job_limit=?,
-            max_minutes_per_job=?, max_images_per_job=?, updated_at=? WHERE id=?""",
+            max_minutes_per_job=?, max_images_per_job=?, storage_limit_bytes=?,
+            updated_at=? WHERE id=?""",
             (customer_code, plan.key, plan.monthly_jobs, plan.max_minutes,
-             plan.max_images, now, attempt["user_id"]),
+             plan.max_images, plan.storage_gb * BYTES_PER_GB, now,
+             attempt["user_id"]),
         )
         return True
 
@@ -1139,6 +1178,95 @@ def media_reference_count(reference: str) -> int:
             (reference, reference),
         ).fetchone()
         return int(row["total"])
+
+
+def record_media_asset(
+    *, owner_id: int, reference: str, size_bytes: int, kind: str
+) -> None:
+    with connect() as db:
+        db.execute(
+            """INSERT INTO media_assets
+            (reference, owner_id, size_bytes, kind, created_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(reference) DO UPDATE SET size_bytes=EXCLUDED.size_bytes""",
+            (reference, owner_id, max(0, size_bytes), kind, utc_now()),
+        )
+
+
+def reserve_media_assets(
+    owner_id: int, assets: list[tuple[str, int, str]]
+) -> bool:
+    """Atomically reserve storage so concurrent uploads cannot exceed the limit."""
+    with connect() as db:
+        user = db.execute(
+            "SELECT storage_limit_bytes FROM users WHERE id=? FOR UPDATE", (owner_id,)
+        ).fetchone()
+        if not user:
+            return False
+        usage = int(db.execute(
+            """SELECT COALESCE(SUM(size_bytes), 0) AS total
+            FROM media_assets WHERE owner_id=?""",
+            (owner_id,),
+        ).fetchone()["total"])
+        new_assets = []
+        for reference, size_bytes, kind in assets:
+            exists = db.execute(
+                "SELECT 1 AS present FROM media_assets WHERE reference=?", (reference,)
+            ).fetchone()
+            if not exists:
+                new_assets.append((reference, max(0, size_bytes), kind))
+        if usage + sum(item[1] for item in new_assets) > int(user["storage_limit_bytes"]):
+            return False
+        now = utc_now()
+        for reference, size_bytes, kind in new_assets:
+            db.execute(
+                """INSERT INTO media_assets
+                (reference, owner_id, size_bytes, kind, created_at)
+                VALUES (?, ?, ?, ?, ?) ON CONFLICT(reference) DO NOTHING""",
+                (reference, owner_id, size_bytes, kind, now),
+            )
+        return True
+
+
+def remove_media_asset(reference: str | None) -> None:
+    if not reference:
+        return
+    with connect() as db:
+        db.execute("DELETE FROM media_assets WHERE reference=?", (reference,))
+
+
+def media_asset_recorded(reference: str) -> bool:
+    with connect() as db:
+        return bool(db.execute(
+            "SELECT 1 AS present FROM media_assets WHERE reference=?", (reference,)
+        ).fetchone())
+
+
+def storage_usage_bytes(user_id: int) -> int:
+    with connect() as db:
+        row = db.execute(
+            """SELECT COALESCE(SUM(size_bytes), 0) AS total
+            FROM media_assets WHERE owner_id=?""",
+            (user_id,),
+        ).fetchone()
+        return int(row["total"])
+
+
+def can_add_storage(user_id: int, additional_bytes: int) -> bool:
+    with connect() as db:
+        user = db.execute(
+            "SELECT storage_limit_bytes FROM users WHERE id=?", (user_id,)
+        ).fetchone()
+        if not user:
+            return False
+        usage = db.execute(
+            """SELECT COALESCE(SUM(size_bytes), 0) AS total
+            FROM media_assets WHERE owner_id=?""",
+            (user_id,),
+        ).fetchone()
+        return int(usage["total"]) + max(0, additional_bytes) <= int(
+            user["storage_limit_bytes"]
+        )
 
 
 def claim_job():
@@ -1402,9 +1530,9 @@ def revoke_disputed_payment(reference: str) -> int | None:
         )
         db.execute(
             """UPDATE users SET plan=?, monthly_job_limit=?, max_minutes_per_job=?,
-            max_images_per_job=?, updated_at=? WHERE id=?""",
+            max_images_per_job=?, storage_limit_bytes=?, updated_at=? WHERE id=?""",
             (free.key, free.monthly_jobs, free.max_minutes, free.max_images,
-             now, subscription["user_id"]),
+             free.storage_gb * BYTES_PER_GB, now, subscription["user_id"]),
         )
         return int(subscription["user_id"])
 
@@ -1429,10 +1557,16 @@ def user_export(user_id: int) -> dict:
             WHERE user_id=? ORDER BY created_at""",
             (user_id,),
         ).fetchall()
+        stored_media = db.execute(
+            """SELECT reference, size_bytes, kind, created_at FROM media_assets
+            WHERE owner_id=? ORDER BY created_at""",
+            (user_id,),
+        ).fetchall()
         return {"account": dict(user) if user else {},
                 "jobs": [dict(row) for row in jobs],
                 "payments": [dict(row) for row in payments],
-                "feedback": [dict(row) for row in feedback]}
+                "feedback": [dict(row) for row in feedback],
+                "stored_media": [dict(row) for row in stored_media]}
 
 
 def delete_creator(user_id: int) -> None:

@@ -4,6 +4,7 @@
   <div><p class="eyebrow">Create a video</p><h1>What story should we make?</h1><p>Enter an idea and choose the length. We will create the story, voice, images, captions, sound, thumbnail, and final video.</p></div>
 </div>
 {% if remaining is none %}<div class="usage-strip"><span>Administrator workspace</span><strong>{{ usage }} stories in the last 30 days</strong><span>No creator limit applied</span></div>{% else %}<div class="usage-strip"><span>{{ usage }} of {{ current_user.monthly_job_limit }} stories used in the last 30 days</span><strong>{{ remaining }} remaining</strong><span>{{ current_user.plan|title }} · up to {{ current_user.max_minutes_per_job|int }} minutes · {{ current_user.max_images_per_job }} images</span></div>{% endif %}
+<div class="storage-strip"><div><span>Video storage</span><strong>{{ storage_usage.used|storage_size }} of {{ storage_usage.limit|storage_size }} used</strong></div><div class="storage-meter" role="progressbar" aria-valuenow="{{ storage_usage.percent }}" aria-valuemin="0" aria-valuemax="100"><i style="width: {{ storage_usage.percent }}%"></i></div><small>{{ storage_usage.remaining|storage_size }} available</small></div>
 
 <div class="content-grid form-layout">
   <section class="panel">

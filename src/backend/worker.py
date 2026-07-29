@@ -149,12 +149,24 @@ def migrate_one_local_media() -> bool:
         storage.job_video_key(owner_id, int(job["id"]), local_video.suffix or ".mp4"),
         "video/mp4",
     )
+    database.record_media_asset(
+        owner_id=owner_id,
+        reference=remote_video,
+        size_bytes=local_video.stat().st_size,
+        kind="upload" if job["kind"] == "manual" else "video",
+    )
     local_thumbnail = THUMBNAILS_DIR / f"{local_video.stem}.jpg"
     if local_thumbnail.is_file():
-        storage.upload_file(
+        remote_thumbnail = storage.upload_file(
             local_thumbnail,
             storage.job_thumbnail_key(owner_id, int(job["id"])),
             "image/jpeg",
+        )
+        database.record_media_asset(
+            owner_id=owner_id,
+            reference=remote_thumbnail,
+            size_bytes=local_thumbnail.stat().st_size,
+            kind="thumbnail",
         )
     database.update_job(int(job["id"]), str(job["status"]), video_path=remote_video)
     if job["kind"] == "automatic":
@@ -213,18 +225,47 @@ def process_job(job) -> None:
             elif storage.is_remote(job.get("video_path")):
                 remote_video = str(job["video_path"])
             else:
-                remote_video = storage.upload_file(
-                    video_path,
-                    storage.job_video_key(owner_id, int(job["id"]), video_path.suffix or ".mp4"),
-                    "video/mp4",
-                )
                 local_thumbnail = THUMBNAILS_DIR / f"{video_path.stem}.jpg"
+                video_key = storage.job_video_key(
+                    owner_id, int(job["id"]), video_path.suffix or ".mp4"
+                )
+                expected_video = storage.object_reference(video_key)
+                assets = [(expected_video, video_path.stat().st_size, "video")]
                 if local_thumbnail.is_file():
-                    storage.upload_file(
-                        local_thumbnail,
-                        storage.job_thumbnail_key(owner_id, int(job["id"])),
-                        "image/jpeg",
+                    expected_thumbnail = storage.object_reference(
+                        storage.job_thumbnail_key(owner_id, int(job["id"]))
                     )
+                    assets.append(
+                        (expected_thumbnail, local_thumbnail.stat().st_size, "thumbnail")
+                    )
+                if not database.reserve_media_assets(owner_id, assets):
+                    if generated_video:
+                        cleanup_generated_media(generated_video)
+                    raise RuntimeError(
+                        "Storage is full. Delete an old video or upgrade the plan, then retry."
+                    )
+                try:
+                    remote_video = storage.upload_file(
+                        video_path, video_key, "video/mp4"
+                    )
+                except RuntimeError:
+                    for reference, _size, _kind in assets:
+                        database.remove_media_asset(reference)
+                    raise
+                database.update_job(
+                    int(job["id"]), "processing", video_path=remote_video
+                )
+                job["video_path"] = remote_video
+                if local_thumbnail.is_file():
+                    try:
+                        storage.upload_file(
+                            local_thumbnail,
+                            storage.job_thumbnail_key(owner_id, int(job["id"])),
+                            "image/jpeg",
+                        )
+                    except RuntimeError:
+                        database.remove_media_asset(expected_thumbnail)
+                        raise
             job["video_path"] = remote_video
 
             platforms = json.loads(job["platforms"])
@@ -266,16 +307,25 @@ def process_job(job) -> None:
         database.delete_job(job["id"])
         for reference in {value for value in references if storage.is_remote(value)}:
             if database.media_reference_count(reference) == 0:
-                try:
-                    storage.delete_object(reference)
-                    storage.delete_object(storage.thumbnail_reference(reference))
-                except RuntimeError:
-                    pass
+                for stored_reference in (reference, storage.thumbnail_reference(reference)):
+                    if not stored_reference:
+                        continue
+                    try:
+                        storage.delete_object(stored_reference)
+                        database.remove_media_asset(stored_reference)
+                    except RuntimeError:
+                        pass
     except (OSError, subprocess.CalledProcessError, RuntimeError) as exc:
         database.update_job(job["id"], "failed", error=str(exc))
+        storage_full = str(exc).startswith("Storage is full.")
         notify_creator(
             job.get("owner_id"),
-            f"Video #{job.get('owner_job_number') or job['id']} could not be finished. It did not use one of your plan videos, and you can try again.",
+            (
+                "Your storage is full. Delete an old video or upgrade your plan, "
+                f"then retry video #{job.get('owner_job_number') or job['id']}."
+                if storage_full else
+                f"Video #{job.get('owner_job_number') or job['id']} could not be finished. It did not use one of your plan videos, and you can try again."
+            ),
         )
 
 

@@ -4,6 +4,7 @@
   <div><p class="eyebrow">Publish</p><h1>Share your finished videos</h1><p>Choose a completed video, add the post details, and send it to a connected channel.</p></div>
 </div>
 {% if error %}<div class="alert error" role="alert">{{ error }}</div>{% endif %}
+<div class="storage-strip"><div><span>Video storage</span><strong>{{ storage_usage.used|storage_size }} of {{ storage_usage.limit|storage_size }} used</strong></div><div class="storage-meter" role="progressbar" aria-valuenow="{{ storage_usage.percent }}" aria-valuemin="0" aria-valuemax="100"><i style="width: {{ storage_usage.percent }}%"></i></div><small>{{ storage_usage.remaining|storage_size }} available</small></div>
 
 <div class="content-grid social-layout">
   <section class="panel span-two">

@@ -3,25 +3,25 @@
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Pricing · Sleep Studio</title>
-  <script src="/static/theme.js?v=20260729-5"></script>
-  <link rel="stylesheet" href="/static/style.css?v=20260729-5">
+  <script src="/static/theme.js?v=20260729-11"></script>
+  <link rel="stylesheet" href="/static/style.css?v=20260729-11">
 </head>
 <body class="marketing-body">
 <header class="marketing-nav"><a class="brand" href="/"><span class="brand-mark">S</span><span><strong>Sleep Studio</strong><small>Story video creator</small></span></a><nav><a href="/">Home</a><button class="theme-toggle inline" type="button" data-theme-toggle aria-label="Switch to dark mode">☾ Dark</button>{% if current_user %}<a class="button primary" href="/app">Workspace</a>{% else %}<a class="button primary" href="/login">Sign in</a>{% endif %}</nav></header>
 <main><section class="marketing-section pricing-page">
-  <div class="section-intro"><p class="eyebrow">Pricing in naira</p><h1>Choose how often you want to publish.</h1><p>Every plan creates complete story videos. Higher plans give you more videos, longer stories, and more different scene images. Paid plans last 30 days and do not renew by themselves.</p></div>
+  <div class="section-intro"><p class="eyebrow">Pricing in naira</p><h1>Create videos and keep them in your account.</h1><p>Every plan includes complete story videos and private storage. Higher plans give you more videos, longer stories, more scene images, and more storage. Paid plans last 30 days and do not renew by themselves.</p></div>
   {% if request.query_params.get('billing') == 'failed' %}<div class="alert error">Paystack did not confirm that payment. Your current plan was not changed.</div>{% endif %}
   <div class="pricing-grid">{% for plan in plans %}<article class="pricing-card {{ 'featured' if plan.key == 'pro' else '' }}">
     {% if plan.key == 'pro' %}<span class="plan-badge">Most popular</span>{% endif %}
     <h3>{{ plan.name }}</h3><p>{{ plan.description }}</p>
     <div class="plan-price"><strong>₦{{ '{:,}'.format(plan.monthly_price_ngn) }}</strong><span>{{ '/ 30 days' if plan.monthly_price_ngn else 'free plan' }}</span></div><p class="plan-fit"><strong>Best for</strong>{{ plan.best_for }}</p>
-    <ul><li><strong>{{ plan.publishing_pace }}</strong></li><li>Each video can be up to {{ plan.max_minutes }} minutes long.</li><li>Up to {{ plan.max_images }} newly created scene images in each video.</li><li>Story, voice, captions, sound, thumbnail, and downloadable video included.</li></ul>
+    <ul><li><strong>{{ plan.publishing_pace }}</strong></li><li>Each video can be up to {{ plan.max_minutes }} minutes long.</li><li>Up to {{ plan.max_images }} newly created scene images in each video.</li><li><strong>{{ plan.storage_gb }} GB private video storage.</strong></li><li>Story, voice, captions, sound, thumbnail, and downloadable video included.</li></ul>
     {% if not current_user %}<a class="button {{ 'primary' if plan.key == 'pro' else 'secondary' }}" href="/login">{{ 'Start free' if plan.key == 'free' else 'Sign in to choose' }}</a>
     {% elif current_user.role == 'admin' %}<a class="button secondary" href="/admin/customers">Manage customer plans</a>
     {% elif plan.key == 'free' %}<button class="button secondary" disabled>{{ 'Current plan' if current_user.plan == 'free' else 'Included fallback' }}</button>
     {% else %}<form method="post" action="/billing/checkout/{{ plan.key }}"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="button {{ 'primary' if plan.key == 'pro' else 'secondary' }}" type="submit" {{ 'disabled' if not billing_configured or plan.key in blocked_downgrades }}>{{ 'Available after current plan' if plan.key in blocked_downgrades else ('Renew ' if current_user.plan == plan.key else 'Choose ') ~ plan.name }}</button></form>{% endif %}
   </article>{% endfor %}</div>
-  <div class="pricing-explainer"><article><strong>What counts as one video?</strong><p>One successfully completed story video uses one video from your plan. Failed or cancelled work does not use your allowance.</p></article><article><strong>What are scene images?</strong><p>They are the different images made to match important moments in your story. An image may be reused with movement when the same scene continues.</p></article><article><strong>How renewal works</strong><p>Paid access lasts 30 days. Sleep Studio does not charge you again automatically; you choose when to renew.</p></article></div>
+  <div class="pricing-explainer"><article><strong>What uses storage?</strong><p>Finished videos, thumbnails, and uploaded videos use storage. Reusing one stored video does not count it twice.</p></article><article><strong>What happens when storage is full?</strong><p>Your files stay safe. Delete old videos or upgrade before creating or uploading another one.</p></article><article><strong>How renewal works</strong><p>Paid access lasts 30 days. Sleep Studio does not charge you again automatically; you choose when to renew.</p></article></div>
   {% if not billing_configured %}<p class="form-note pricing-note">Paid plans are temporarily unavailable. Please try again later.</p>{% endif %}
 </section></main>
 <footer class="marketing-footer"><span>© 2026 Sleep Studio</span><a href="/legal/billing-policy">Billing policy</a><a href="/legal/terms">Terms</a><a href="/legal/support">Support</a></footer>

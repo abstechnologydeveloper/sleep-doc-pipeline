@@ -61,6 +61,11 @@ FRIENDLY_STATUSES = {
 TEMPLATES.env.filters["friendly_status"] = (
     lambda value: FRIENDLY_STATUSES.get(str(value), str(value).replace("_", " ").title())
 )
+TEMPLATES.env.filters["storage_size"] = lambda value: (
+    f"{float(value) / (1024 ** 3):.1f} GB"
+    if int(value) >= 1024 ** 3
+    else f"{float(value) / (1024 ** 2):.0f} MB"
+)
 JOB_STATUSES = (
     "queued",
     "processing",
@@ -269,11 +274,53 @@ def delete_unreferenced_media(*references: str | None) -> None:
     for reference in {value for value in references if storage.is_remote(value)}:
         if database.media_reference_count(reference) != 0:
             continue
+        for stored_reference in (reference, storage.thumbnail_reference(reference)):
+            if not stored_reference:
+                continue
+            try:
+                storage.delete_object(stored_reference)
+                database.remove_media_asset(stored_reference)
+            except RuntimeError:
+                pass
+
+
+def sync_creator_storage(user_id: int) -> None:
+    """Index existing media once so legacy R2 files count toward plan storage."""
+    references = {
+        reference for reference in database.user_media_references(user_id)
+        if storage.is_remote(reference)
+    }
+    references.update(
+        thumbnail for thumbnail in (
+            storage.thumbnail_reference(reference) for reference in tuple(references)
+        ) if thumbnail
+    )
+    for reference in references:
+        if database.media_asset_recorded(reference):
+            continue
         try:
-            storage.delete_object(reference)
-            storage.delete_object(storage.thumbnail_reference(reference))
+            size_bytes = storage.object_size(reference)
         except RuntimeError:
-            pass
+            continue
+        database.record_media_asset(
+            owner_id=user_id,
+            reference=reference,
+            size_bytes=size_bytes,
+            kind="thumbnail" if reference.endswith("/thumbnail.jpg") else "video",
+        )
+
+
+def creator_storage(user) -> dict[str, int]:
+    user_id = int(user["id"])
+    sync_creator_storage(user_id)
+    used = database.storage_usage_bytes(user_id)
+    limit = int(user["storage_limit_bytes"])
+    return {
+        "used": used,
+        "limit": limit,
+        "remaining": max(0, limit - used),
+        "percent": min(100, round(used * 100 / limit)) if limit else 100,
+    }
 
 
 def render_social_page(
@@ -291,6 +338,7 @@ def render_social_page(
             platforms=[{"name": item.name,
                         "available": item.name == "youtube" and item.configured}
                        for item in connectors],
+            storage_usage=creator_storage(current_user(request)),
             error=error,
         ),
         status_code=status_code,
@@ -559,6 +607,7 @@ def dashboard(request: Request):
             jobs=database.list_jobs(limit=8, owner_id=user_id, include_all=include_all),
             media_items=reusable_media(request)[:4],
             connectors=[] if include_all else connector_statuses(user_id),
+            storage_usage=None if include_all else creator_storage(current_user(request)),
         ),
     )
 
@@ -585,6 +634,7 @@ def storytelling_page(request: Request):
             ),
             usage=usage,
             remaining=remaining,
+            storage_usage=creator_storage(user),
             voice_options=VOICE_OPTIONS,
             prompt_starters=prompt_starters(str(user["creator_niche"])),
         ),
@@ -673,6 +723,7 @@ def settings_page(request: Request):
             subscription=subscription,
             payments=database.payment_history(int(user["id"]), limit=20),
             current_plan=PLANS.get(user["plan"], PLANS["free"]),
+            storage_usage=creator_storage(user),
             billing_configured=paystack.configured(),
             niche_options=NICHE_OPTIONS,
             content_styles=CONTENT_STYLES,
@@ -994,6 +1045,12 @@ async def automatic_job(request: Request):
             f"Duration must be between 0.5 and {user['max_minutes_per_job']:g} minutes.",
             status_code=409,
         )
+    storage_usage = creator_storage(user)
+    if storage_usage["used"] >= storage_usage["limit"]:
+        return HTMLResponse(
+            "Your storage is full. Delete an old video or upgrade before creating another.",
+            status_code=409,
+        )
     job_id, limit_error = database.create_story_job(
         owner_id=int(user["id"]),
         topic=topic, minutes=minutes,
@@ -1036,19 +1093,35 @@ async def upload_media(
     except ValueError as exc:
         return render_social_page(request, str(exc), 400)
     max_upload_bytes = int(os.getenv("MAX_UPLOAD_MB", "2048")) * 1024 * 1024
-    if video.size is not None and video.size > max_upload_bytes:
+    if video.size is None:
+        video.file.seek(0, 2)
+        upload_size = video.file.tell()
+        video.file.seek(0)
+    else:
+        upload_size = int(video.size)
+    if upload_size > max_upload_bytes:
         return render_social_page(
             request, "The uploaded video exceeds the account upload limit.", 413
         )
 
-    user_id = int(current_user(request)["id"])
+    user = current_user(request)
+    user_id = int(user["id"])
+    sync_creator_storage(user_id)
     object_key = (
         f"sleep-studio/creators/{user_id}/uploads/"
         f"{datetime.now(timezone.utc):%Y%m%d_%H%M%S}_{secrets.token_hex(8)}{suffix}"
     )
-    media_reference = None
+    media_reference = storage.object_reference(object_key)
+    if not database.reserve_media_assets(
+        user_id, [(media_reference, upload_size, "upload")]
+    ):
+        return render_social_page(
+            request,
+            "This upload would exceed your storage limit. Delete old media or upgrade your plan.",
+            413,
+        )
     try:
-        if video.size == 0:
+        if upload_size == 0:
             raise ValueError("The uploaded video is empty.")
         media_reference = await asyncio.to_thread(
             storage.upload_fileobj,
@@ -1064,6 +1137,7 @@ async def upload_media(
             source_path=media_reference,
         )
     except (OSError, RuntimeError, ValueError) as exc:
+        database.remove_media_asset(media_reference)
         if media_reference:
             try:
                 storage.delete_object(media_reference)
@@ -1349,6 +1423,7 @@ def admin_customer_detail(request: Request, user_id: int):
     customer = database.get_user(user_id)
     if not customer or customer["role"] != "creator":
         return HTMLResponse("Customer not found", status_code=404)
+    customer_storage = creator_storage(customer)
     return TEMPLATES.TemplateResponse(
         request, "admin_customer_detail.html",
         page_context(
@@ -1356,6 +1431,7 @@ def admin_customer_detail(request: Request, user_id: int):
             jobs=database.list_jobs(limit=50, owner_id=user_id),
             payments=database.payment_history(user_id, limit=50),
             usage=database.monthly_job_usage(user_id),
+            storage_usage=customer_storage,
         ),
     )
 
@@ -1376,6 +1452,10 @@ def admin_usage(request: Request):
     redirect = admin_required(request)
     if redirect:
         return redirect
+    customers = database.list_users()
+    for customer in customers:
+        if customer["role"] == "creator":
+            sync_creator_storage(int(customer["id"]))
     return TEMPLATES.TemplateResponse(
         request, "admin_usage.html",
         page_context(request, "usage", customers=database.list_users()),
@@ -1447,7 +1527,7 @@ LEGAL_PAGES = {
     "terms": ("Terms of service", "Creators must own or have permission to use submitted material. Accounts may not be used for unlawful, abusive or rights-infringing content. Paid access lasts 30 days and provider availability is not guaranteed."),
     "acceptable-use": ("Acceptable use", "Do not submit sexual content involving minors, instructions for serious harm, praise for mass violence, impersonation, malware, fraud, or material that violates another person's rights."),
     "copyright": ("Copyright policy", "Sleep Studio requires original stories and does not permit copying or close paraphrasing of protected works. Rights holders may contact the operator with the work, URL and proof of authority."),
-    "billing-policy": ("Billing policy", "Payments are processed by Paystack in naira. Access is purchased for 30 days and renews only when the creator starts another payment. A lower tier takes effect only after current paid access ends."),
+    "billing-policy": ("Billing policy", "Payments are processed by Paystack in naira. Access is purchased for 30 days and renews only when the creator starts another payment. Each plan includes a storage limit for finished videos, thumbnails and uploaded media. Reaching the limit blocks new media but does not automatically delete stored files. A lower tier takes effect only after current paid access ends."),
     "support": ("Support", "For account, billing, copyright or production help, contact the support address configured by the Sleep Studio operator."),
 }
 
@@ -1498,6 +1578,7 @@ def admin_update_customer(
     monthly_job_limit: int = Form(),
     max_minutes_per_job: float = Form(),
     max_images_per_job: int = Form(),
+    storage_limit_gb: int = Form(),
     status: str = Form(),
     csrf: str = Form(),
 ):
@@ -1516,6 +1597,8 @@ def admin_update_customer(
         return HTMLResponse("Invalid customer plan", status_code=400)
     if not 1 <= max_images_per_job <= 48:
         return HTMLResponse("Image limit must be between 1 and 48", status_code=400)
+    if not 1 <= storage_limit_gb <= 10_000:
+        return HTMLResponse("Storage limit must be between 1 and 10,000 GB", status_code=400)
     if status not in {"active", "suspended"}:
         return HTMLResponse("Invalid account status", status_code=400)
     database.update_user_limits(
@@ -1524,11 +1607,12 @@ def admin_update_customer(
         monthly_job_limit=monthly_job_limit,
         max_minutes_per_job=max_minutes_per_job,
         max_images_per_job=max_images_per_job,
+        storage_limit_bytes=storage_limit_gb * 1024 ** 3,
         status=status,
     )
     database.record_audit(
         int(current_user(request)["id"]), "customer.limits_updated", "user",
-        str(user_id), f"plan={plan}; status={status}; jobs={monthly_job_limit}; minutes={max_minutes_per_job}; images={max_images_per_job}",
+        str(user_id), f"plan={plan}; status={status}; jobs={monthly_job_limit}; minutes={max_minutes_per_job}; images={max_images_per_job}; storage_gb={storage_limit_gb}",
     )
     return RedirectResponse(f"/admin/customers/{user_id}?saved=1", status_code=303)
 
@@ -1546,6 +1630,12 @@ def retry(request: Request, job_id: int, csrf: str = Form()):
     if user["role"] == "creator" and job["kind"] == "automatic" and job["status"] == "failed":
         if database.monthly_job_usage(int(user["id"])) >= int(user["monthly_job_limit"]):
             return HTMLResponse("You have used all videos included in your current plan.", status_code=409)
+        storage_usage = creator_storage(user)
+        if storage_usage["used"] >= storage_usage["limit"]:
+            return HTMLResponse(
+                "Your storage is full. Delete an old video or upgrade before retrying.",
+                status_code=409,
+            )
         if database.active_job_count(int(user["id"])) >= MAX_ACTIVE_CREATOR_JOBS:
             return HTMLResponse("Wait for your current video to finish before trying again.", status_code=409)
     database.retry_job(job_id)

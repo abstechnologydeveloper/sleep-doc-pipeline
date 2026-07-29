@@ -11,6 +11,7 @@ class Plan:
     monthly_jobs: int
     max_minutes: int
     max_images: int
+    storage_gb: int
     description: str
     best_for: str
     publishing_pace: str
@@ -18,25 +19,25 @@ class Plan:
 
 PLANS = {
     "free": Plan(
-        "free", "Free", 0, 3, 5, 8,
+        "free", "Free", 0, 3, 5, 8, 1,
         "Try the full video-making process before paying.",
         "Testing story ideas and learning how Sleep Studio works.",
         "Create up to 3 short videos in 30 days.",
     ),
     "basic": Plan(
-        "basic", "Basic", 15_000, 10, 10, 16,
+        "basic", "Basic", 15_000, 10, 10, 16, 10,
         "Make regular videos for a new or part-time channel.",
         "Creators publishing about two videos each week.",
         "Create up to 10 videos in 30 days.",
     ),
     "pro": Plan(
-        "pro", "Pro", 40_000, 30, 20, 32,
+        "pro", "Pro", 40_000, 30, 20, 32, 50,
         "Publish longer story videos on a consistent schedule.",
         "Active channels that want enough capacity for daily publishing.",
         "Create up to 30 videos in 30 days.",
     ),
     "studio": Plan(
-        "studio", "Studio", 100_000, 100, 30, 48,
+        "studio", "Studio", 100_000, 100, 30, 48, 200,
         "Produce longer videos at a high monthly volume.",
         "High-volume creators managing a busy production schedule.",
         "Create up to 100 videos in 30 days.",

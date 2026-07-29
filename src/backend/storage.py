@@ -69,6 +69,20 @@ def exists(reference: str | None) -> bool:
         return False
 
 
+def object_size(reference: str) -> int:
+    if not is_remote(reference):
+        try:
+            return Path(reference).stat().st_size
+        except OSError as exc:
+            raise RuntimeError("Media size could not be read") from exc
+    _account, _access, _secret, bucket = _settings()
+    try:
+        response = _client().head_object(Bucket=bucket, Key=object_key(reference))
+        return int(response.get("ContentLength", 0))
+    except (BotoCoreError, ClientError) as exc:
+        raise RuntimeError("Media size could not be read from R2") from exc
+
+
 def delete_object(reference: str | None) -> None:
     if not is_remote(reference):
         return
