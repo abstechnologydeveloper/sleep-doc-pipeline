@@ -71,6 +71,53 @@ def send_magic_link(email: str, token: str) -> None:
         raise RuntimeError("The sign-in email could not be sent.") from exc
 
 
+def send_welcome_email(email: str) -> None:
+    """Send a new creator a short product introduction without blocking signup."""
+    api_key = os.getenv("RESEND_API_KEY", "").strip()
+    sender = os.getenv("AUTH_FROM_EMAIL", "").strip()
+    if not api_key or not sender:
+        return
+    workspace_url = f"{public_base_url()}/storytelling"
+    payload = json.dumps(
+        {
+            "from": sender,
+            "to": [email],
+            "subject": "Welcome to My Automation Studio",
+            "html": (
+                "<h2>Welcome to My Automation Studio</h2>"
+                "<p>Turn a simple story idea into a complete video without doing "
+                "every editing step yourself.</p>"
+                "<p>We help you create the story, matching scene pictures, voice, "
+                "captions, sound, thumbnail, and finished video.</p>"
+                "<p>You can review and download your video, or connect YouTube and "
+                "publish it from your account.</p>"
+                "<h3>Make your first video</h3>"
+                "<ol><li>Enter your story idea.</li><li>Choose the video length, "
+                "picture style, and voice.</li><li>Start the job and return when "
+                "your video is ready.</li></ol>"
+                f'<p><a href="{workspace_url}">Open your creator workspace</a></p>'
+                "<p>We are glad to have you here.</p>"
+            ),
+        }
+    ).encode("utf-8")
+    api_request = request.Request(
+        "https://api.resend.com/emails",
+        data=payload,
+        method="POST",
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "User-Agent": "my-automation-studio/1.0",
+        },
+    )
+    try:
+        with request.urlopen(api_request, timeout=20) as response:
+            if response.status >= 300:
+                print("Welcome email was rejected by the provider.", flush=True)
+    except (error.URLError, error.HTTPError, TimeoutError):
+        print("Welcome email could not be sent.", flush=True)
+
+
 def google_enabled() -> bool:
     return bool(os.getenv("GOOGLE_OAUTH_CLIENT_ID") and os.getenv("GOOGLE_OAUTH_CLIENT_SECRET"))
 

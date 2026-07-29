@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import quote_plus
 
-from fastapi import FastAPI, Form, Request, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import BackgroundTasks, FastAPI, Form, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -27,6 +27,7 @@ from .auth import (
     normalize_email,
     request_ip_hash,
     send_magic_link,
+    send_welcome_email,
     token_hash,
 )
 from .publishers import (
@@ -542,20 +543,23 @@ def email_login(request: Request, email: str = Form(), csrf: str = Form()):
 
 
 @app.get("/auth/email/verify")
-def verify_email_login(request: Request, token: str = ""):
+def verify_email_login(request: Request, background_tasks: BackgroundTasks, token: str = ""):
     if not token:
         return RedirectResponse("/login?error=Invalid+sign-in+link", status_code=303)
     link = database.consume_magic_link(token_hash(token))
     if not link:
         return RedirectResponse("/login?error=Link+expired+or+already+used", status_code=303)
-    user = database.get_or_create_user(
-        email=link["email"], admin_email=os.getenv("ADMIN_EMAIL", "").strip()
+    user, created = database.get_or_create_user(
+        email=link["email"], admin_email=os.getenv("ADMIN_EMAIL", "").strip(),
+        return_created=True,
     )
     if user["status"] != "active":
         return RedirectResponse("/login?error=Account+suspended", status_code=303)
     request.session.clear()
     request.session["user_id"] = int(user["id"])
     csrf_token(request)
+    if created:
+        background_tasks.add_task(send_welcome_email, str(user["email"]))
     return RedirectResponse("/app", status_code=303)
 
 
@@ -570,17 +574,20 @@ def google_login(request: Request):
 
 
 @app.get("/auth/google/callback")
-def google_callback(request: Request, code: str = "", state: str = ""):
+def google_callback(
+    request: Request, background_tasks: BackgroundTasks, code: str = "", state: str = ""
+):
     expected = str(request.session.pop("google_oauth_state", ""))
     if not expected or not hmac.compare_digest(expected, state):
         return RedirectResponse("/login?error=Invalid+Google+sign-in+state", status_code=303)
     try:
         profile = google_identity(code)
-        user = database.get_or_create_user(
+        user, created = database.get_or_create_user(
             email=profile["email"],
             name=profile["name"],
             avatar_url=profile["avatar_url"],
             admin_email=os.getenv("ADMIN_EMAIL", "").strip(),
+            return_created=True,
         )
         database.link_identity(int(user["id"]), "google", profile["subject"])
     except RuntimeError:
@@ -590,6 +597,8 @@ def google_callback(request: Request, code: str = "", state: str = ""):
     request.session.clear()
     request.session["user_id"] = int(user["id"])
     csrf_token(request)
+    if created:
+        background_tasks.add_task(send_welcome_email, str(user["email"]))
     return RedirectResponse("/app", status_code=303)
 
 

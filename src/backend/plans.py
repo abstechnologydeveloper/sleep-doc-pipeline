@@ -8,6 +8,7 @@ class Plan:
     key: str
     name: str
     monthly_price_ngn: int
+    monthly_price_usd: int
     monthly_jobs: int
     max_minutes: int
     max_images: int
@@ -19,25 +20,25 @@ class Plan:
 
 PLANS = {
     "free": Plan(
-        "free", "Free", 0, 3, 5, 8, 1,
+        "free", "Free", 0, 0, 3, 5, 8, 1,
         "Try making full videos before you pay.",
         "People who want to test My Automation Studio.",
         "Make up to 3 short videos in 30 days.",
     ),
     "basic": Plan(
-        "basic", "Basic", 15_000, 10, 10, 16, 10,
+        "basic", "Basic", 8_000, 5, 10, 10, 16, 10,
         "Make videos often for a new or small channel.",
         "Creators who post about two videos each week.",
         "Make up to 10 videos in 30 days.",
     ),
     "pro": Plan(
-        "pro", "Pro", 40_000, 30, 20, 32, 50,
+        "pro", "Pro", 24_000, 15, 30, 20, 32, 50,
         "Make longer videos and post almost every day.",
         "Active creators who want to post every day.",
         "Make up to 30 videos in 30 days.",
     ),
     "studio": Plan(
-        "studio", "Studio", 100_000, 100, 30, 48, 200,
+        "studio", "Studio", 80_000, 50, 100, 30, 48, 200,
         "Make many long videos every month.",
         "Busy creators who need several videos each day.",
         "Make up to 100 videos in 30 days.",

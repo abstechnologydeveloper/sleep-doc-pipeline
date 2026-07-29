@@ -867,7 +867,8 @@ def list_public_testimonials(limit: int = 6):
 
 
 def get_or_create_user(
-    *, email: str, name: str = "", avatar_url: str = "", admin_email: str = ""
+    *, email: str, name: str = "", avatar_url: str = "", admin_email: str = "",
+    return_created: bool = False,
 ):
     now = utc_now()
     normalized_email = email.strip().lower()
@@ -897,8 +898,9 @@ def get_or_create_user(
             )
             user_id = cursor.fetchone()["id"]
             user = db.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
-            return user
-        return db.execute("SELECT * FROM users WHERE id = ?", (user["id"],)).fetchone()
+            return (user, True) if return_created else user
+        result = db.execute("SELECT * FROM users WHERE id = ?", (user["id"],)).fetchone()
+        return (result, False) if return_created else result
 
 
 def link_identity(user_id: int, provider: str, subject: str) -> None:
