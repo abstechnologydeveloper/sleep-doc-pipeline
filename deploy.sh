@@ -42,7 +42,7 @@ docker compose build
 docker compose run --rm --no-deps --user root --entrypoint chown studio \
   studio:studio /app/data /app/scripts /app/audio /app/images /app/sounds /app/videos /app/thumbnails
 docker compose up -d --no-build --remove-orphans --wait
-curl --fail --silent --show-error http://127.0.0.1:8090/health
+curl --fail --silent --show-error "http://127.0.0.1:${STUDIO_BIND_PORT:-8090}/health"
 
 # Keep active containers and persistent files. Remove only unused Docker
 # artifacts older than 24 hours so deployments cannot fill the VPS disk.

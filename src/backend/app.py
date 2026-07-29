@@ -1163,9 +1163,9 @@ async def upload_media(
     user = current_user(request)
     user_id = int(user["id"])
     sync_creator_storage(user_id)
-    object_key = (
-        f"sleep-studio/creators/{user_id}/uploads/"
-        f"{datetime.now(timezone.utc):%Y%m%d_%H%M%S}_{secrets.token_hex(8)}{suffix}"
+    object_key = storage.creator_upload_key(
+        user_id,
+        f"{datetime.now(timezone.utc):%Y%m%d_%H%M%S}_{secrets.token_hex(8)}{suffix}",
     )
     media_reference = storage.object_reference(object_key)
     if not database.reserve_media_assets(
@@ -1294,7 +1294,10 @@ async def manual_job(
     if video.size is not None and video.size > max_upload_bytes:
         return HTMLResponse("The uploaded video exceeds the account upload limit.", status_code=413)
     user_id = int(current_user(request)["id"])
-    object_key = f"sleep-studio/creators/{user_id}/uploads/{datetime.now(timezone.utc):%Y%m%d_%H%M%S}_{secrets.token_hex(8)}{suffix}"
+    object_key = storage.creator_upload_key(
+        user_id,
+        f"{datetime.now(timezone.utc):%Y%m%d_%H%M%S}_{secrets.token_hex(8)}{suffix}",
+    )
     source_reference = await asyncio.to_thread(
         storage.upload_fileobj,
         video.file,

@@ -39,7 +39,7 @@ AUTH_FROM_EMAIL=Sleep Studio <login@your-verified-domain.example>
 RESEND_API_KEY=your_resend_api_key
 GOOGLE_OAUTH_CLIENT_ID=your_google_client_id
 GOOGLE_OAUTH_CLIENT_SECRET=your_google_client_secret
-PUBLIC_BASE_URL=https://sleep-studio.69.197.164.87.nip.io
+PUBLIC_BASE_URL=https://myautomationstudio.com
 COOKIE_SECURE=true
 POSTGRES_PASSWORD=replace_with_a_long_random_password
 DATABASE_URL=postgresql://sleep_studio:replace_with_a_long_random_password@postgres:5432/sleep_studio
@@ -48,11 +48,13 @@ R2_ACCOUNT_ID=your_cloudflare_account_id
 R2_ACCESS_KEY_ID=your_r2_access_key_id
 R2_SECRET_ACCESS_KEY=your_r2_secret_access_key
 R2_BUCKET=your_private_r2_bucket
+R2_PREFIX=sleep-studio
 R2_PUBLIC_DOMAIN=pub-24bed8d26f7f4b77aac16769cc765325.r2.dev
 ```
 
-Register this exact Google OAuth redirect URI:
-`https://sleep-studio.69.197.164.87.nip.io/auth/google/callback`.
+Register these production Google OAuth redirect URIs:
+`https://myautomationstudio.com/auth/google/callback` and
+`https://myautomationstudio.com/connections/youtube/callback`.
 
 ## Application workspaces
 
@@ -95,8 +97,9 @@ then start the dashboard:
 docker compose up -d --build
 ```
 
-The production dashboard is available at
-`https://sleep-studio.69.197.164.87.nip.io`. Nginx terminates HTTPS and proxies
+The production dashboard is available at `https://myautomationstudio.com`, and the
+isolated staging dashboard is available at `https://staging.myautomationstudio.com`.
+Nginx terminates HTTPS and proxies
 to port `8090`, which is bound to localhost so it cannot bypass TLS. Use
 `COOKIE_SECURE=true`. PostgreSQL uses the private `postgres_data` Docker volume.
 Pipeline working directories remain bind-mounted only for rendering and failed-job
@@ -132,24 +135,28 @@ that key without reconnecting every channel. YouTube uses the same global
 individual creators never enter application client credentials.
 
 Enable YouTube Data API v3 and register this redirect URI:
-`https://sleep-studio.69.197.164.87.nip.io/connections/youtube/callback`.
+`https://myautomationstudio.com/connections/youtube/callback`.
 Creators choose Public, Unlisted, or Private for each YouTube upload. Public is
 preselected. YouTube quota, channel
 eligibility, Google app verification, and upload-audit restrictions still apply.
 
 ### GitHub Actions deployment
 
-Production deployment runs only through `.github/workflows/deploy.yml` on a
-dedicated self-hosted runner carrying the `sleep-studio` label. Add a repository
-secret named `STUDIO_ENV_FILE` containing the complete production `.env` file.
-If that secret is not configured, deployment preserves and uses the existing
-`.env` file in the VPS deployment directory.
+Production deployment runs through `.github/workflows/deploy.yml`, while staging uses
+`.github/workflows/deploy-staging.yml`, on the dedicated self-hosted runner carrying the
+`sleep-studio` label. Create GitHub environments named `production` and `staging`, each
+with an environment secret named `STUDIO_ENV_FILE` containing its complete `.env` file.
+Deployment stops before changing containers if its environment secret is missing or belongs
+to the other environment.
 
-The workflow runs only when manually started from the GitHub Actions page. It
-validates the Python source, deploys with Docker Compose, checks `/health`, and
+Production deploys from `main`; staging deploys from `staging`; both also support a manual
+workflow run. Each workflow validates the Python source, deploys with Docker Compose,
+checks `/health`, and
 removes unused Docker images/build cache older than 24 hours. It never prunes
 Docker volumes, and the deployment script excludes the database, uploads,
 generated scripts, audio, images, sounds, thumbnails, and videos from rsync deletion.
+See `DEPLOYMENT.md` for DNS, Nginx, TLS, OAuth, Paystack, environment isolation, and
+the one-time VPS configuration.
 
 ## Requirements
 

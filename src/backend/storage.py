@@ -15,6 +15,13 @@ from botocore.exceptions import BotoCoreError, ClientError
 R2_SCHEME = "r2://"
 
 
+def namespace() -> str:
+    value = os.getenv("R2_PREFIX", "sleep-studio").strip().strip("/")
+    if not value or any(part in {".", ".."} for part in value.split("/")):
+        raise RuntimeError("R2_PREFIX must be a safe non-empty object prefix")
+    return value
+
+
 def _settings() -> tuple[str, str, str, str]:
     values = (
         os.getenv("R2_ACCOUNT_ID", "").strip(),
@@ -171,7 +178,11 @@ def job_video_key(owner_id: int, job_id: int, suffix: str = ".mp4") -> str:
         f"{owner_id}:{job_id}".encode("utf-8"),
         hashlib.sha256,
     ).hexdigest()[:24]
-    return f"sleep-studio/creators/{owner_id}/jobs/{job_id}-{token}/video{suffix.lower()}"
+    return f"{namespace()}/creators/{owner_id}/jobs/{job_id}-{token}/video{suffix.lower()}"
+
+
+def creator_upload_key(owner_id: int, filename: str) -> str:
+    return f"{namespace()}/creators/{owner_id}/uploads/{filename}"
 
 
 def job_thumbnail_key(owner_id: int, job_id: int) -> str:

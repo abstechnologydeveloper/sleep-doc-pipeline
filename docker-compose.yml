@@ -1,7 +1,7 @@
 services:
   postgres:
     image: postgres:17-alpine
-    container_name: sleep-studio-postgres
+    container_name: ${STUDIO_CONTAINER_PREFIX:-sleep-studio}-postgres
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-sleep_studio}
@@ -19,7 +19,7 @@ services:
 
   studio:
     build: .
-    container_name: sleep-studio
+    container_name: ${STUDIO_CONTAINER_PREFIX:-sleep-studio}
     restart: unless-stopped
     env_file: .env
     environment:
@@ -28,7 +28,7 @@ services:
       postgres:
         condition: service_healthy
     ports:
-      - "127.0.0.1:8090:8090"
+      - "127.0.0.1:${STUDIO_BIND_PORT:-8090}:8090"
     volumes:
       - ./data:/app/data
       - ./scripts:/app/scripts
