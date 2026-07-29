@@ -6,7 +6,7 @@
   <a class="button secondary" href="/showcase">Back to gallery</a>
 </div>
 <section class="panel showcase-player">
-  <video class="video-player" controls preload="metadata" poster="/showcase/{{ job.id }}/thumbnail" src="/showcase/{{ job.id }}/video"></video>
+  <video class="video-player" controls controlsList="nodownload" disablepictureinpicture preload="metadata" poster="/showcase/{{ job.id }}/thumbnail" src="/showcase/{{ job.id }}/video" oncontextmenu="return false"></video>
   {% if job.description %}<p>{{ job.description }}</p>{% endif %}
 </section>
 {% endblock %}

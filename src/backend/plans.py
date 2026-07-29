@@ -20,10 +20,10 @@ class Plan:
 
 PLANS = {
     "free": Plan(
-        "free", "Free", 0, 0, 3, 5, 8, 1,
+        "free", "Free", 0, 0, 2, 5, 8, 1,
         "Try making full videos before you pay.",
         "People who want to test My Automation Studio.",
-        "Make up to 3 short videos in 30 days.",
+        "Make up to 2 short videos in 30 days.",
     ),
     "basic": Plan(
         "basic", "Basic", 8_000, 5, 10, 10, 16, 10,

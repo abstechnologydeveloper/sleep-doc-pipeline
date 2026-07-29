@@ -56,6 +56,9 @@ Use original language and follow these writing rules:
   relationship shift, or difficult choice instead of repeating similar scenes.
 - Keep names, relationships, knowledge, motivations, locations, props, time, weather, travel,
   and physical details consistent unless the story clearly changes them.
+- When the topic does not provide a character name, choose a fresh name that fits the setting,
+  culture, time period, and audience. Do not repeatedly default to Ella or another common
+  stock character name across unrelated stories.
 - Pay off important clues, promises, objects, rules, and relationships. The climax should
   result from the central character's accumulated choices, learning, kindness, or courage.
 - Resolve the central story question and show the emotional change before a gentle ending.

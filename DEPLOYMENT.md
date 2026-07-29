@@ -25,6 +25,8 @@ Create these records:
 
 Create GitHub environments named `production` and `staging`. Add one environment secret
 named `STUDIO_ENV_FILE` to each. Do not use a GitHub variable for this file.
+After both environment secrets exist, remove the repository-level `STUDIO_ENV_FILE` so a
+missing environment secret cannot silently fall back to the wrong database or payment key.
 
 Production routing is supplied by its workflow. Do not add these values to the secret:
 
@@ -59,7 +61,17 @@ DATABASE_URL=postgresql://sleep_studio:STAGING_PASSWORD@postgres:5432/sleep_stud
 ```
 
 The same R2 bucket credentials may be used because `R2_PREFIX` prevents object collisions.
-Use Paystack test credentials in staging and live credentials in production.
+Add `PAYSTACK_SECRET_KEY=sk_test_...` to the staging `STUDIO_ENV_FILE` and
+`PAYSTACK_SECRET_KEY=sk_live_...` to the production `STUDIO_ENV_FILE`. Never reuse the live
+key in staging. Configure the matching Paystack webhooks as:
+
+```text
+https://staging.myautomationstudio.com/billing/webhook
+https://myautomationstudio.com/billing/webhook
+```
+
+Paystack signs webhooks with the corresponding secret key, so this integration does not use
+a separate webhook-secret value.
 
 ## 3. Nginx and HTTPS
 
