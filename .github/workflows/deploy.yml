@@ -25,7 +25,7 @@ jobs:
     timeout-minutes: 30
     environment: production
     env:
-      STUDIO_ENV_FILE: ${{ secrets.STUDIO_ENV_FILE }}
+      STUDIO_ENV_FILE: ${{ secrets.PRODUCTION_STUDIO_ENV_FILE }}
       STUDIO_DEPLOY_DIR: /home/administrator/sleep-doc-pipeline
       STUDIO_BIND_PORT: "8090"
       STUDIO_CONTAINER_PREFIX: sleep-studio
@@ -41,7 +41,7 @@ jobs:
         shell: bash
         run: |
           if [[ -z "${STUDIO_ENV_FILE:-}" ]]; then
-            echo "STUDIO_ENV_FILE is unavailable. Add it under repository secrets or the production environment secrets, not Variables." >&2
+            echo "PRODUCTION_STUDIO_ENV_FILE is unavailable. Add it under repository secrets, not Variables." >&2
             exit 1
           fi
           required_keys=(

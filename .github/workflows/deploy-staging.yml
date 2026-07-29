@@ -25,7 +25,7 @@ jobs:
     timeout-minutes: 30
     environment: staging
     env:
-      STUDIO_ENV_FILE: ${{ secrets.STUDIO_ENV_FILE }}
+      STUDIO_ENV_FILE: ${{ secrets.STAGING_STUDIO_ENV_FILE }}
       STUDIO_DEPLOY_DIR: /home/administrator/sleep-doc-pipeline-staging
       STUDIO_BIND_PORT: "8091"
       STUDIO_CONTAINER_PREFIX: sleep-studio-staging
@@ -41,7 +41,7 @@ jobs:
         shell: bash
         run: |
           if [[ -z "${STUDIO_ENV_FILE:-}" ]]; then
-            echo "Add STUDIO_ENV_FILE to the staging GitHub environment secrets." >&2
+            echo "Add STAGING_STUDIO_ENV_FILE under repository secrets, not Variables." >&2
             exit 1
           fi
           required_keys=(
