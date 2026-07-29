@@ -304,28 +304,36 @@ html[data-theme="dark"] .story-preview { border-color: #39415a; box-shadow: 0 30
 .marketing-section { width: min(1180px, calc(100% - 40px)); margin: auto; padding: 95px 0; }
 .section-intro { max-width: 640px; margin-bottom: 45px; }
 .section-intro h2, .split-feature h2, .cta-panel h2 { font-size: clamp(31px, 4vw, 48px); line-height: 1.05; letter-spacing: -.04em; }
+.value-section { padding-bottom: 55px; }
+.value-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+.value-grid article { padding: 22px 0; border-top: 2px solid var(--blue); }
+.value-grid strong { display: block; margin-bottom: 8px; font-size: 18px; }
+.value-grid p { margin: 0; font-size: 13px; }
 .feature-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
 .feature-grid article, .feature-stack article { padding: 23px; border: 1px solid var(--border); border-radius: 13px; background: var(--card-gradient); }
 .feature-grid article > span { color: #7890ff; font-size: 11px; font-weight: 800; }
 .feature-grid h3 { margin: 24px 0 9px; font-size: 17px; }
 .feature-grid p, .feature-stack p { margin: 0; font-size: 13px; }
 .split-feature { display: grid; grid-template-columns: 1fr 1fr; gap: 80px; align-items: center; }
-.success-story { display: grid; grid-template-columns: .9fr 1.1fr; gap: 70px; align-items: center; }
-.success-story h2 { font-size: clamp(31px, 4vw, 48px); line-height: 1.05; letter-spacing: -.04em; }
-.success-visual { position: relative; display: grid; gap: 10px; padding: 78px 24px 24px; border: 1px solid var(--border); border-radius: 20px; background: linear-gradient(145deg, #536fe8, #8c5bc6 52%, #ef8d66); box-shadow: 0 25px 70px #3c427333; }
-.success-visual > div { padding: 14px; border: 1px solid #ffffff38; border-radius: 10px; background: #11162cc7; color: #fff; }
-.success-visual strong, .success-visual small { color: #fff; }
-.success-play { position: absolute; top: 22px; left: 24px; display: grid; place-items: center; width: 40px; height: 40px; border-radius: 50%; background: #fff; color: #526fe8; }
 .check-list { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 28px 0 0; padding: 0; list-style: none; color: var(--text); font-size: 13px; }
 .check-list li::before { content: "✓"; margin-right: 8px; color: #7590ff; }
 .feature-stack { display: grid; gap: 12px; }
 .feature-stack strong { display: block; margin-bottom: 7px; }
-.pricing-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; align-items: stretch; }
+.creator-story { display: grid; grid-template-columns: 1fr 1fr; gap: 70px; align-items: center; padding-block: 70px; }
+.creator-story h2 { font-size: clamp(31px, 4vw, 48px); line-height: 1.05; letter-spacing: -.04em; }
+.example-label { display: inline-flex; margin-bottom: 14px; padding: 5px 8px; border-radius: 999px; background: var(--blue-soft); color: var(--blue); font-size: 10px; font-weight: 800; text-transform: uppercase; }
+.creator-story-copy .button { margin-top: 8px; }
+.outcome-list { display: grid; gap: 12px; }
+.outcome-list article { display: flex; gap: 15px; padding: 20px; border: 1px solid var(--border); border-radius: 13px; background: var(--card-gradient); }
+.outcome-list article > span { display: grid; place-items: center; flex: 0 0 31px; height: 31px; border-radius: 50%; background: var(--blue-soft); color: var(--blue); font-size: 12px; font-weight: 800; }
+.outcome-list strong { display: block; margin-bottom: 5px; }
+.outcome-list p { margin: 0; font-size: 13px; }
+.pricing-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; align-items: stretch; }
 .pricing-card { position: relative; display: flex; flex-direction: column; padding: 24px; border: 1px solid var(--border); border-radius: 14px; background: var(--card-gradient); }
 .pricing-card.featured { border-color: #657ce0; box-shadow: 0 18px 55px #30448f24; }
 .pricing-card h3 { margin: 0 0 8px; font-size: 20px; }
-.pricing-card > p { min-height: 62px; font-size: 12px; }
-.pricing-card ul { display: grid; gap: 10px; min-height: 155px; margin: 20px 0 24px; padding: 0; list-style: none; color: var(--text); font-size: 12px; }
+.pricing-card > p:not(.plan-fit) { min-height: 42px; font-size: 13px; }
+.pricing-card ul { display: grid; gap: 10px; min-height: 150px; margin: 20px 0 24px; padding: 0; list-style: none; color: var(--text); font-size: 13px; line-height: 1.5; }
 .pricing-card li::before { content: "✓"; margin-right: 7px; color: #7590ff; }
 .pricing-card .button, .pricing-card form, .pricing-card form .button { width: 100%; margin-top: auto; }
 .plan-badge { position: absolute; top: 16px; right: 16px; padding: 4px 7px; border-radius: 999px; background: var(--blue-soft); color: #4059bd; font-size: 9px; font-weight: 800; text-transform: uppercase; }
@@ -334,6 +342,11 @@ html[data-theme="dark"] .plan-badge { color: #b9c5ff; }
 .plan-price strong { font-size: 36px; }
 .plan-price span { color: var(--muted); font-size: 11px; }
 .plan-price.compact { margin: 16px 0 22px; }
+.plan-fit { min-height: 72px; margin: 20px 0 0; padding: 12px; border-radius: 9px; background: var(--panel-soft); font-size: 12px; }
+.plan-fit strong { display: block; margin-bottom: 4px; color: var(--text); }
+.pricing-explainer { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 24px; }
+.pricing-explainer article { padding: 18px; border: 1px solid var(--border); border-radius: 12px; background: var(--panel-soft); }
+.pricing-explainer p { margin: 7px 0 0; font-size: 12px; }
 .pricing-page { min-height: calc(100vh - 150px); padding-top: 70px; }
 .pricing-page .section-intro h1 { font-size: clamp(36px, 5vw, 58px); }
 .pricing-note { width: max-content; max-width: 100%; margin: 18px auto 0; }
@@ -364,10 +377,12 @@ html[data-theme="dark"] .cta-panel { border-color: #3c4770; background: radial-g
   .field-row, .filter-bar { grid-template-columns: 1fr; }
   .filter-bar .button { width: 100%; }
   .marketing-nav nav > a:not(.button) { display: none; }
-  .hero, .split-feature, .success-story { grid-template-columns: 1fr; gap: 45px; }
+  .hero, .split-feature, .creator-story { grid-template-columns: 1fr; gap: 45px; }
   .hero { padding-top: 60px; }
   .feature-grid { grid-template-columns: 1fr 1fr; }
+  .value-grid { grid-template-columns: 1fr; }
   .limit-form { min-width: 390px; }
+  .pricing-explainer { grid-template-columns: 1fr; }
   .job-table, .job-table tbody { display: block; }
   .job-table thead { display: none; }
   .job-table tr { display: grid; grid-template-columns: 28px 48px minmax(0, 1fr) auto; align-items: center; gap: 8px; margin-bottom: 10px; padding: 12px; border: 1px solid var(--border); border-radius: 9px; background: var(--panel); }
