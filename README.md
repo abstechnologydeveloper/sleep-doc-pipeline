@@ -26,7 +26,7 @@ administrator-only **Customers** workspace lists all accounts and allows free-ti
 monthly story limits, maximum story duration, and account status to be changed.
 The administrator is administration-only and onboards normal creator accounts from
 the **Customers** workspace. Creators then verify their email or use Google to sign in.
-New creators default to three stories per UTC month, ten minutes per story, and one
+New creators default to three stories per rolling 30 days, five minutes per story, and one
 active generation at a time. The complete policy is in `BUSINESS_RULES.md`.
 
 Passwordless authentication requires these production settings:
@@ -60,9 +60,10 @@ Creators use a compact sidebar with five workspaces:
 
 - **Overview:** production counts, recent jobs, finished media, and connector status.
 - **Storytelling:** generate complete narrated videos for the shared media library.
-- **Ambient Video:** a prepared but disabled workspace for the future ambient pipeline.
 - **Social Posts:** upload finished media or publish a library video with shared metadata.
 - **Jobs:** filter and manage generation, media-upload, and publishing jobs.
+- **Settings & billing:** edit the creator profile and niche, choose narration defaults,
+  switch plans, and review Paystack-funded access.
 
 Administrators see only the operational overview, all jobs, and customer management;
 creator generation, uploads, publishing forms, and channel connections are denied by
@@ -71,6 +72,18 @@ the server as well as hidden from the navigation.
 Job status, overview counts, and newly completed media update through an authenticated
 WebSocket connection. Publishing uses a server-validated media ID rather than accepting
 an arbitrary file path from the browser.
+
+Each creator sees job numbers beginning at `#1`; these stable creator-local numbers are
+separate from the globally unique IDs used internally. The interface defaults to light
+mode and stores an optional dark-mode preference in the browser. The public landing page
+and finished-video share pages include crawler-friendly Open Graph preview images for
+WhatsApp and other social platforms.
+
+Story generation explicitly requires a central character or focal subject, an early story
+question, cause-and-effect progression, meaningful middle changes, stable continuity,
+setup/payoff discipline, a character-driven climax, and a complete gentle resolution.
+Metadata and scene planning support the same promise so the title, thumbnail, narration,
+visuals, and ending do not drift into different stories.
 
 Automatic jobs retain their exact saved script path. Retrying a failed job resumes that
 script and reuses completed narration chunks and generated assets instead of starting over.
@@ -157,18 +170,35 @@ GEMINI_API_KEY=your_gemini_key
 CLOUDFLARE_ACCOUNT_ID=your_cloudflare_account_id
 CLOUDFLARE_API_TOKEN=your_workers_ai_api_token
 CLOUDFLARE_IMAGE_MODEL=@cf/leonardo/lucid-origin
-MAX_STORY_IMAGES=120
+MAX_STORY_IMAGES=48
 ELEVENLABS_API_KEY=your_optional_elevenlabs_key
+PAYSTACK_SECRET_KEY=sk_test_or_live_key
+SUPPORT_EMAIL=support@example.com
+MAX_UPLOAD_MB=2048
 ```
 
 Do not commit `.env` or share its contents.
+
+Configure the Paystack webhook URL as `https://your-host/billing/webhook`. Sleep Studio
+initializes NGN transactions with a unique server-side reference, verifies successful
+callbacks against Paystack, and validates webhook signatures with `PAYSTACK_SECRET_KEY`.
+Paid access lasts 30 days and is renewed manually; no Paystack plan code is required.
+
+Completed storytelling usage is recorded separately from job rows, so deleting completed
+work does not restore allowance. Failed and cancelled generation releases allowance. Creators
+can review payment history, job and billing notifications, export their account record, or
+permanently delete their creator account and stored media. Administrators can search customers,
+review recent payments, and see an audit trail for limit changes.
+
+The public privacy, terms, acceptable-use, copyright, billing and support pages are operational
+policy drafts. Have qualified Nigerian legal counsel review them before accepting production
+payments. See `COST_MODEL.md` before treating the published tiers as proven profitable prices.
 
 ## Project layout
 
 ```text
 src/
   pipeline/   Script, audio, image, video, and orchestration implementation
-  ambient/    Reserved boundary for the upcoming non-narrated ambient workflow
   backend/    FastAPI server, database, worker, and publishing integrations
   web/        Templates and static assets
   project_paths.py   Shared locations for persistent and generated files
@@ -294,10 +324,10 @@ then renders the distinct scene images. Existing files are skipped, and delibera
 reused scenes do not create another paid image request. Video timing and sound cues
 read the same scene plan, keeping each visual aligned with its actual narration.
 
-`MAX_STORY_IMAGES` is a hard spending guard, not a pacing target. The default is
-120. If the planner reports that an important storyline needs more distinct visuals,
-the image stage stops before paid generation and asks for a higher limit instead of
-silently omitting story events.
+`MAX_STORY_IMAGES` is a command-line safety fallback with a default of 48. Web jobs
+snapshot the creator plan's lower per-story allowance (8, 16, 32, or 48). The planner
+keeps every timed story beat but consolidates compositions and reuses suitable visuals
+with different motion when another paid image would exceed the allowance.
 
 Lucid Origin receives a native 1536×864 request. The assembler scales and crops to
 the final 1280×720 frame without letterboxing. A separate native-widescreen thumbnail

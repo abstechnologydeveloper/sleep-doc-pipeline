@@ -29,6 +29,33 @@
     }
   });
 
+  const topicInput = document.querySelector("[data-topic-input]");
+  document.querySelectorAll("[data-prompt-starter]").forEach((button) => {
+    button.addEventListener("click", () => {
+      if (!topicInput) return;
+      topicInput.value = button.dataset.promptStarter || "";
+      topicInput.focus();
+    });
+  });
+
+  const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "your local time";
+  document.querySelectorAll("[data-local-timezone]").forEach((node) => {
+    node.textContent = `Optional · ${timezone}`;
+  });
+  document.querySelectorAll("[data-local-schedule]").forEach((input) => {
+    input.form?.addEventListener("submit", () => {
+      if (!input.value) return;
+      const selected = new Date(input.value);
+      if (!Number.isNaN(selected.getTime())) input.value = selected.toISOString().slice(0, 19);
+    });
+  });
+  document.querySelectorAll("[data-utc-time]").forEach((node) => {
+    const value = node.dataset.utcTime;
+    if (!value) return;
+    const date = new Date(value);
+    if (!Number.isNaN(date.getTime())) node.textContent = date.toLocaleString();
+  });
+
   document.querySelectorAll("[data-bulk-jobs]").forEach((form) => {
     const selectAll = form.querySelector("[data-select-all]");
     const selections = [...form.querySelectorAll("[data-job-select]")];
@@ -61,8 +88,20 @@
   const mediaGrid = document.querySelector(".media-grid");
   if (!dashboardRows.length && !detailId && !metricNodes.length && !mediaGrid) return;
 
-  const displayStatus = (status) =>
-    status.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+  const statusLabels = {
+    queued: "Waiting to start",
+    processing: "Creating your video",
+    publishing: "Sending to channel",
+    completed: "Ready to watch",
+    published: "Published",
+    waiting_for_connections: "Needs channel connection",
+    failed: "Needs attention",
+    cancel_requested: "Stopping",
+    pending: "Waiting",
+    waiting: "Needs connection",
+  };
+  const displayStatus = (status) => statusLabels[status]
+    || status.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
   const updateStatus = (node, status) => {
     if (!node) return;
     [...node.classList]

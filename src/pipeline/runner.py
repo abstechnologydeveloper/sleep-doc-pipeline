@@ -61,6 +61,14 @@ def parse_args() -> argparse.Namespace:
         default="",
         help="Optional post title used to create the video thumbnail",
     )
+    parser.add_argument("--voice", default="Kore", help="Gemini narration voice")
+    parser.add_argument("--niche", default="", help="Creator niche guidance")
+    parser.add_argument("--audience", default="", help="Target audience guidance")
+    parser.add_argument("--content-style", default="cinematic", help="Preferred visual style")
+    parser.add_argument(
+        "--max-images", type=int, default=None,
+        help="Maximum distinct paid scene images for this job",
+    )
     args = parser.parse_args()
     if (args.resume or args.resume_script) and (
         args.topic is not None or args.minutes is not None
@@ -70,6 +78,10 @@ def parse_args() -> argparse.Namespace:
         parser.error("--resume and --resume-script cannot be combined")
     if args.minutes is not None and args.minutes <= 0:
         parser.error("minutes must be greater than zero")
+    if args.max_images is not None and args.max_images < 1:
+        parser.error("--max-images must be at least 1")
+    if args.max_images is not None and args.max_images > 48:
+        parser.error("--max-images cannot exceed the global limit of 48")
     return args
 
 
@@ -202,6 +214,10 @@ def main() -> None:
                 str(BASE_DIR / "generate_script.py"),
                 "--minutes",
                 str(minutes),
+                "--niche",
+                args.niche,
+                "--audience",
+                args.audience,
                 "--",
                 topic,
             ],
@@ -217,7 +233,7 @@ def main() -> None:
             print("Regenerating audio because caption timing data is missing.")
         run_step(
             "2/5 Generating narration audio",
-            [python, str(BASE_DIR / "generate_audio.py"), str(script_path)],
+            [python, str(BASE_DIR / "generate_audio.py"), str(script_path), "--voice", args.voice],
         )
     run_step(
         "3/5 Generating Cloudflare scene images",
@@ -227,6 +243,9 @@ def main() -> None:
             str(script_path),
             "--title",
             args.title,
+            "--content-style",
+            args.content_style,
+            *(["--max-images", str(args.max_images)] if args.max_images else []),
         ],
     )
     run_step(

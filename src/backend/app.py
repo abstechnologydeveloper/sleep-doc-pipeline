@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import FastAPI, Form, Request, UploadFile, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
@@ -17,6 +17,7 @@ from project_paths import THUMBNAILS_DIR
 
 from . import database
 from . import storage
+from . import paystack
 from .auth import (
     google_authorization_url,
     google_enabled,
@@ -35,10 +36,31 @@ from .publishers import (
     youtube_authorization_url,
 )
 from .worker import start_worker
+from .social_preview import landing_preview_png
+from .plans import (
+    CONTENT_STYLES, NICHE_OPTIONS, PAID_PLAN_KEYS, PLAN_RANK, PLANS, VOICE_OPTIONS,
+    prompt_starters,
+)
+from .content_policy import validate_creator_content
 
 
 WEB_DIR = Path(__file__).resolve().parents[1] / "web"
 TEMPLATES = Jinja2Templates(directory=WEB_DIR / "templates")
+FRIENDLY_STATUSES = {
+    "queued": "Waiting to start",
+    "processing": "Creating your video",
+    "publishing": "Sending to channel",
+    "completed": "Ready to watch",
+    "published": "Published",
+    "waiting_for_connections": "Needs channel connection",
+    "failed": "Needs attention",
+    "cancel_requested": "Stopping",
+    "pending": "Waiting",
+    "waiting": "Needs connection",
+}
+TEMPLATES.env.filters["friendly_status"] = (
+    lambda value: FRIENDLY_STATUSES.get(str(value), str(value).replace("_", " ").title())
+)
 JOB_STATUSES = (
     "queued",
     "processing",
@@ -234,6 +256,7 @@ def delete_unreferenced_media(*references: str | None) -> None:
 def render_social_page(
     request: Request, error: str | None = None, status_code: int = 200
 ):
+    connectors = connector_statuses(int(current_user(request)["id"]))
     return TEMPLATES.TemplateResponse(
         request,
         "social.html",
@@ -241,8 +264,10 @@ def render_social_page(
             request,
             "social",
             media_items=reusable_media(request),
-            connectors=connector_statuses(int(current_user(request)["id"])),
-            platforms=PLATFORMS,
+            connectors=connectors,
+            platforms=[{"name": item.name,
+                        "available": item.name == "youtube" and item.configured}
+                       for item in connectors],
             error=error,
         ),
         status_code=status_code,
@@ -252,6 +277,15 @@ def render_social_page(
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.get("/social-preview.png", name="landing_social_preview")
+def landing_social_preview():
+    return Response(
+        landing_preview_png(),
+        media_type="image/png",
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
 
 
 @app.websocket("/ws/jobs")
@@ -419,10 +453,41 @@ def logout(request: Request, csrf: str = Form()):
 
 @app.get("/", response_class=HTMLResponse)
 def landing(request: Request):
+    base_url = public_base_url() or str(request.base_url).rstrip("/")
     return TEMPLATES.TemplateResponse(
         request,
         "landing.html",
-        {"current_user": current_user(request)},
+        {
+            "current_user": current_user(request),
+            "plans": PLANS.values(),
+            "landing_url": f"{base_url}/",
+            "preview_url": f"{base_url}/social-preview.png",
+        },
+    )
+
+
+@app.get("/pricing", response_class=HTMLResponse)
+def pricing_page(request: Request):
+    user = current_user(request)
+    subscription = (
+        database.subscription_for_user(int(user["id"]))
+        if user and user["role"] == "creator" else None
+    )
+    return TEMPLATES.TemplateResponse(
+        request,
+        "pricing.html",
+        {
+            "current_user": user,
+            "plans": PLANS.values(),
+            "csrf": csrf_token(request) if user else "",
+            "billing_configured": paystack.configured(),
+            "subscription": subscription,
+            "blocked_downgrades": {
+                key for key in PAID_PLAN_KEYS
+                if user and subscription and subscription["status"] == "active"
+                and PLAN_RANK.get(key, 0) < PLAN_RANK.get(str(user["plan"]), 0)
+            },
+        },
     )
 
 
@@ -442,6 +507,16 @@ def dashboard(request: Request):
             for status in ("completed", "published", "waiting_for_connections")
         ),
     }
+    if include_all:
+        customers = database.list_users()
+        summary.update(
+            customers=sum(row["role"] == "creator" for row in customers),
+            active_customers=sum(
+                row["role"] == "creator" and row["status"] == "active"
+                for row in customers
+            ),
+            paid_revenue=database.confirmed_revenue_ngn(),
+        )
     return TEMPLATES.TemplateResponse(
         request,
         "overview.html",
@@ -478,20 +553,215 @@ def storytelling_page(request: Request):
             ),
             usage=usage,
             remaining=remaining,
+            voice_options=VOICE_OPTIONS,
+            prompt_starters=prompt_starters(str(user["creator_niche"])),
         ),
     )
 
 
-@app.get("/ambient", response_class=HTMLResponse)
-def ambient_page(request: Request):
+@app.get("/settings", response_class=HTMLResponse)
+def settings_page(request: Request):
     redirect = creator_required(request)
     if redirect:
         return redirect
+    user = current_user(request)
+    subscription = database.subscription_for_user(int(user["id"]))
+    if subscription and subscription["status"] == "active" and subscription["current_period_end"]:
+        try:
+            remaining = datetime.fromisoformat(str(subscription["current_period_end"])) - datetime.now(timezone.utc)
+            if 0 <= remaining.days <= 7:
+                database.add_notification_once(
+                    int(user["id"]), "billing",
+                    f"Your {str(subscription['plan']).title()} access ends on {str(subscription['current_period_end'])[:10]}. Renew from Pricing if you want uninterrupted access.",
+                )
+        except ValueError:
+            pass
     return TEMPLATES.TemplateResponse(
         request,
-        "ambient.html",
-        page_context(request, "ambient"),
+        "settings.html",
+        page_context(
+            request,
+            "settings",
+            voice_options=VOICE_OPTIONS,
+            subscription=subscription,
+            payments=database.payment_history(int(user["id"]), limit=20),
+            current_plan=PLANS.get(user["plan"], PLANS["free"]),
+            billing_configured=paystack.configured(),
+            niche_options=NICHE_OPTIONS,
+            content_styles=CONTENT_STYLES,
+        ),
     )
+
+
+@app.post("/settings")
+def update_settings(
+    request: Request,
+    name: str = Form(""),
+    channel_name: str = Form(""),
+    creator_niche: str = Form(""),
+    target_audience: str = Form(""),
+    content_style: str = Form("cinematic"),
+    creator_goal: str = Form(""),
+    narration_voice: str = Form(),
+    default_story_minutes: float = Form(),
+    csrf: str = Form(),
+):
+    redirect = creator_required(request)
+    if redirect:
+        return redirect
+    user = current_user(request)
+    try:
+        verify_csrf(request, csrf)
+    except ValueError:
+        return HTMLResponse("Invalid form token", status_code=400)
+    if narration_voice not in VOICE_OPTIONS:
+        return HTMLResponse("Choose a supported narration voice", status_code=400)
+    if creator_niche not in NICHE_OPTIONS:
+        return HTMLResponse("Choose a supported creator niche", status_code=400)
+    if content_style not in CONTENT_STYLES:
+        return HTMLResponse("Choose a supported content style", status_code=400)
+    if not 0.5 <= default_story_minutes <= float(user["max_minutes_per_job"]):
+        return HTMLResponse("Default duration exceeds your plan limit", status_code=400)
+    database.update_creator_settings(
+        int(user["id"]),
+        name=name.strip()[:120],
+        channel_name=channel_name.strip()[:120],
+        creator_niche=creator_niche,
+        target_audience=target_audience.strip()[:160],
+        content_style=content_style,
+        creator_goal=creator_goal.strip()[:300],
+        narration_voice=narration_voice,
+        default_story_minutes=default_story_minutes,
+    )
+    return RedirectResponse("/settings?saved=1", status_code=303)
+
+
+def public_base_url() -> str:
+    return os.getenv("PUBLIC_BASE_URL", "").strip().rstrip("/")
+
+
+@app.post("/billing/checkout/{plan}")
+def billing_checkout(request: Request, plan: str, csrf: str = Form()):
+    redirect = creator_required(request)
+    if redirect:
+        return redirect
+    try:
+        verify_csrf(request, csrf)
+    except ValueError:
+        return HTMLResponse("Invalid form token", status_code=400)
+    if plan not in PAID_PLAN_KEYS:
+        return HTMLResponse("Unknown subscription plan", status_code=404)
+    if not paystack.configured():
+        return HTMLResponse("Paystack billing is not configured.", status_code=503)
+    user = current_user(request)
+    selected_plan = PLANS[plan]
+    subscription = database.subscription_for_user(int(user["id"]))
+    if (
+        subscription and subscription["status"] == "active"
+        and subscription["current_period_end"]
+        and str(subscription["current_period_end"]) > datetime.now(timezone.utc).isoformat(timespec="seconds")
+        and PLAN_RANK.get(plan, 0) < PLAN_RANK.get(str(user["plan"]), 0)
+    ):
+        return HTMLResponse(
+            "A lower plan can be selected after your current paid access ends. "
+            "Your existing limits will not be reduced early.", status_code=409,
+        )
+    reference = f"SS-{user['id']}-{secrets.token_hex(8)}"
+    base_url = public_base_url()
+    if not base_url.startswith("https://") and not base_url.startswith("http://localhost"):
+        return HTMLResponse("PUBLIC_BASE_URL must be configured for Paystack.", status_code=503)
+    database.create_payment_attempt(
+        reference=reference, user_id=int(user["id"]), plan=plan,
+        amount_ngn=selected_plan.monthly_price_ngn,
+    )
+    try:
+        url = paystack.initialize_transaction(
+            user_id=int(user["id"]), email=str(user["email"]), plan=plan,
+            amount_ngn=selected_plan.monthly_price_ngn, reference=reference,
+            callback_url=f"{base_url}/billing/paystack/callback",
+        )
+    except RuntimeError as exc:
+        database.fail_payment_attempt(reference)
+        return HTMLResponse(str(exc), status_code=503)
+    return RedirectResponse(url, status_code=303)
+
+
+@app.get("/billing/paystack/callback")
+def paystack_callback(request: Request, reference: str = ""):
+    redirect = creator_required(request)
+    if redirect:
+        return redirect
+    try:
+        data = paystack.verify_transaction(reference)
+        if data.get("status") != "success" or str(data.get("reference")) != reference:
+            raise RuntimeError("Paystack has not confirmed this payment.")
+        metadata = data.get("metadata") or {}
+        if str(metadata.get("user_id")) != str(current_user(request)["id"]):
+            raise RuntimeError("This payment belongs to a different account.")
+        activated = database.activate_paystack_payment(
+            reference=reference,
+            event_id=f"verify:{data.get('id') or reference}",
+            event_type="transaction.verify",
+            amount_kobo=int(data.get("amount") or 0),
+            currency=str(data.get("currency") or ""),
+            provider_transaction_id=str(data.get("id") or ""),
+            customer_code=str((data.get("customer") or {}).get("customer_code") or ""),
+        )
+        if activated:
+            database.add_notification(
+                int(current_user(request)["id"]), "billing",
+                f"Your {str(metadata.get('plan') or 'paid').title()} plan payment was confirmed.",
+            )
+    except (RuntimeError, ValueError):
+        return RedirectResponse("/pricing?billing=failed", status_code=303)
+    return RedirectResponse("/settings?billing=success", status_code=303)
+
+
+@app.post("/billing/webhook")
+async def billing_webhook(request: Request):
+    payload = await request.body()
+    try:
+        event = paystack.verify_webhook(
+            payload, request.headers.get("x-paystack-signature", "")
+        )
+    except ValueError:
+        return HTMLResponse("Invalid webhook signature", status_code=400)
+    event_type = str(event.get("event") or "")
+    data = event.get("data") or {}
+    if event_type == "charge.dispute.create":
+        affected_user = database.revoke_disputed_payment(str(data.get("reference") or ""))
+        if affected_user:
+            database.add_notification(
+                affected_user, "billing",
+                "Paid access was paused because Paystack reported a payment dispute. Contact support if this is unexpected.",
+            )
+        return {"received": True}
+    metadata = data.get("metadata") or {}
+    if metadata.get("type") != "SLEEP_STUDIO_SUBSCRIPTION":
+        return {"received": True}
+    reference = str(data.get("reference") or "")
+    if event_type == "charge.failed":
+        database.fail_payment_attempt(reference)
+        return {"received": True}
+    if event_type != "charge.success" or data.get("status") != "success":
+        return {"received": True}
+    activated = database.activate_paystack_payment(
+        reference=reference,
+        event_id=f"charge.success:{data.get('id') or reference}",
+        event_type=event_type,
+        amount_kobo=int(data.get("amount") or 0),
+        currency=str(data.get("currency") or ""),
+        provider_transaction_id=str(data.get("id") or ""),
+        customer_code=str((data.get("customer") or {}).get("customer_code") or ""),
+    )
+    if activated:
+        attempt = database.payment_attempt(reference)
+        if attempt:
+            database.add_notification(
+                int(attempt["user_id"]), "billing",
+                f"Your {str(attempt['plan']).title()} plan payment was confirmed.",
+            )
+    return {"received": True}
 
 
 @app.get("/social", response_class=HTMLResponse)
@@ -625,6 +895,9 @@ async def automatic_job(request: Request):
         topic = str(form.get("topic", "")).strip()
         minutes = float(str(form.get("minutes", "1")))
         scheduled_at = normalized_schedule(str(form.get("scheduled_at", "")))
+        validate_creator_content(
+            topic, str(form.get("title", "")), str(form.get("description", ""))
+        )
     except ValueError:
         return HTMLResponse("Invalid story request", status_code=400)
     if minutes < 0.5 or (
@@ -671,6 +944,15 @@ async def upload_media(
     clean_title = title.strip()
     if not clean_title:
         return render_social_page(request, "A title is required for uploaded media.", 400)
+    try:
+        validate_creator_content(clean_title, description, hashtags)
+    except ValueError as exc:
+        return render_social_page(request, str(exc), 400)
+    max_upload_bytes = int(os.getenv("MAX_UPLOAD_MB", "2048")) * 1024 * 1024
+    if video.size is not None and video.size > max_upload_bytes:
+        return render_social_page(
+            request, "The uploaded video exceeds the account upload limit.", 413
+        )
 
     user_id = int(current_user(request)["id"])
     object_key = (
@@ -723,9 +1005,9 @@ async def create_social_post(request: Request):
     if not storage.available(video_reference):
         return render_social_page(request, "The selected video file is missing.", 400)
 
-    platforms = selected_platforms(form)
+    platforms = [name for name in selected_platforms(form) if name == "youtube"]
     if not platforms:
-        return render_social_page(request, "Select at least one publishing platform.", 400)
+        return render_social_page(request, "Connect YouTube and select it before publishing.", 400)
     try:
         scheduled_at = normalized_schedule(str(form.get("scheduled_at", "")))
     except ValueError:
@@ -736,6 +1018,10 @@ async def create_social_post(request: Request):
         str(form.get("description", "")).strip() or media_job["description"]
     )
     hashtags = str(form.get("hashtags", "")).strip() or media_job["hashtags"]
+    try:
+        validate_creator_content(title, description, hashtags)
+    except ValueError as exc:
+        return render_social_page(request, str(exc), 400)
     job_id = database.create_job(
         owner_id=int(current_user(request)["id"]),
         kind="manual",
@@ -759,10 +1045,14 @@ async def manual_job(
         return redirect
     verify_csrf(request, csrf)
     form = await request.form()
-    platforms = selected_platforms(form)
+    platforms = [name for name in selected_platforms(form) if name == "youtube"]
+    validate_creator_content(title, description, hashtags)
     suffix = Path(video.filename or "").suffix.lower()
     if suffix not in {".mp4", ".mov", ".m4v"}:
         raise ValueError("Upload an MP4, MOV, or M4V video")
+    max_upload_bytes = int(os.getenv("MAX_UPLOAD_MB", "2048")) * 1024 * 1024
+    if video.size is not None and video.size > max_upload_bytes:
+        return HTMLResponse("The uploaded video exceeds the account upload limit.", status_code=413)
     user_id = int(current_user(request)["id"])
     object_key = f"sleep-studio/creators/{user_id}/uploads/{datetime.now(timezone.utc):%Y%m%d_%H%M%S}_{secrets.token_hex(8)}{suffix}"
     source_reference = await asyncio.to_thread(
@@ -877,14 +1167,146 @@ def admin_customers(request: Request):
     redirect = admin_required(request)
     if redirect:
         return redirect
+    query = request.query_params.get("q", "").strip().lower()
+    customers = database.list_users()
+    if query:
+        customers = [row for row in customers if query in str(row["email"]).lower()
+                     or query in str(row["name"]).lower()]
     return TEMPLATES.TemplateResponse(
         request,
         "admin_customers.html",
         page_context(
             request,
             "customers",
-            customers=database.list_users(),
+            customers=customers,
+            plans=PLANS,
+            query=query,
         ),
+    )
+
+
+@app.get("/admin/customers/{user_id}", response_class=HTMLResponse)
+def admin_customer_detail(request: Request, user_id: int):
+    redirect = admin_required(request)
+    if redirect:
+        return redirect
+    customer = database.get_user(user_id)
+    if not customer or customer["role"] != "creator":
+        return HTMLResponse("Customer not found", status_code=404)
+    return TEMPLATES.TemplateResponse(
+        request, "admin_customer_detail.html",
+        page_context(
+            request, "customers", customer=customer, plans=PLANS,
+            jobs=database.list_jobs(limit=50, owner_id=user_id),
+            payments=database.payment_history(user_id, limit=50),
+            usage=database.monthly_job_usage(user_id),
+        ),
+    )
+
+
+@app.get("/admin/payments", response_class=HTMLResponse)
+def admin_payments(request: Request):
+    redirect = admin_required(request)
+    if redirect:
+        return redirect
+    return TEMPLATES.TemplateResponse(
+        request, "admin_payments.html",
+        page_context(request, "payments", payments=database.payment_history(limit=250)),
+    )
+
+
+@app.get("/admin/usage", response_class=HTMLResponse)
+def admin_usage(request: Request):
+    redirect = admin_required(request)
+    if redirect:
+        return redirect
+    return TEMPLATES.TemplateResponse(
+        request, "admin_usage.html",
+        page_context(request, "usage", customers=database.list_users()),
+    )
+
+
+@app.get("/admin/audit", response_class=HTMLResponse)
+def admin_audit(request: Request):
+    redirect = admin_required(request)
+    if redirect:
+        return redirect
+    return TEMPLATES.TemplateResponse(
+        request, "admin_audit.html",
+        page_context(request, "audit", audit_events=database.list_audit_events(limit=250)),
+    )
+
+
+@app.get("/notifications", response_class=HTMLResponse)
+def notifications_page(request: Request):
+    redirect = creator_required(request)
+    if redirect:
+        return redirect
+    user = current_user(request)
+    notices = database.list_notifications(int(user["id"]))
+    database.mark_notifications_read(int(user["id"]))
+    return TEMPLATES.TemplateResponse(
+        request, "notifications.html",
+        page_context(request, "notifications", notifications=notices),
+    )
+
+
+@app.get("/account/export")
+def export_account(request: Request):
+    redirect = creator_required(request)
+    if redirect:
+        return redirect
+    user = current_user(request)
+    payload = json.dumps(database.user_export(int(user["id"])), indent=2, default=str)
+    return Response(
+        payload, media_type="application/json",
+        headers={"Content-Disposition": "attachment; filename=sleep-studio-export.json"},
+    )
+
+
+@app.post("/account/delete")
+def delete_account(request: Request, confirmation: str = Form(), csrf: str = Form()):
+    redirect = creator_required(request)
+    if redirect:
+        return redirect
+    verify_csrf(request, csrf)
+    user = current_user(request)
+    if confirmation.strip().lower() != str(user["email"]).lower():
+        return HTMLResponse("Enter your account email exactly to confirm deletion.", status_code=400)
+    references = database.user_media_references(int(user["id"]))
+    database.record_audit(int(user["id"]), "account.deleted", "user", str(user["id"]))
+    database.delete_creator(int(user["id"]))
+    request.session.clear()
+    for reference in {value for value in references if storage.is_remote(value)}:
+        try:
+            storage.delete_object(reference)
+            storage.delete_object(storage.thumbnail_reference(reference))
+        except RuntimeError:
+            pass
+    return RedirectResponse("/?account=deleted", status_code=303)
+
+
+LEGAL_PAGES = {
+    "privacy": ("Privacy policy", "We collect account, job, billing and usage data needed to operate Sleep Studio. Creator media is stored in Cloudflare R2 and the application exposes it through authenticated workspace routes or creator-enabled share links. We do not sell personal information."),
+    "terms": ("Terms of service", "Creators must own or have permission to use submitted material. Accounts may not be used for unlawful, abusive or rights-infringing content. Paid access lasts 30 days and provider availability is not guaranteed."),
+    "acceptable-use": ("Acceptable use", "Do not submit sexual content involving minors, instructions for serious harm, praise for mass violence, impersonation, malware, fraud, or material that violates another person's rights."),
+    "copyright": ("Copyright policy", "Sleep Studio requires original stories and does not permit copying or close paraphrasing of protected works. Rights holders may contact the operator with the work, URL and proof of authority."),
+    "billing-policy": ("Billing policy", "Payments are processed by Paystack in naira. Access is purchased for 30 days and renews only when the creator starts another payment. A lower tier takes effect only after current paid access ends."),
+    "support": ("Support", "For account, billing, copyright or production help, contact the support address configured by the Sleep Studio operator."),
+}
+
+
+@app.get("/legal/{page}", response_class=HTMLResponse)
+def legal_page(request: Request, page: str):
+    content = LEGAL_PAGES.get(page)
+    if not content:
+        return HTMLResponse("Page not found", status_code=404)
+    page_content = content[1]
+    if page in {"support", "copyright"} and os.getenv("SUPPORT_EMAIL", "").strip():
+        page_content += f" Contact: {os.getenv('SUPPORT_EMAIL', '').strip()}."
+    return TEMPLATES.TemplateResponse(
+        request, "legal.html", {"current_user": current_user(request),
+                                "page_title": content[0], "page_content": page_content},
     )
 
 
@@ -903,6 +1325,11 @@ def admin_create_customer(
     except ValueError:
         return HTMLResponse("Enter a valid customer email", status_code=400)
     _customer, created = database.create_creator(clean_email)
+    database.record_audit(
+        int(current_user(request)["id"]),
+        "customer.onboarded" if created else "customer.onboard_attempted",
+        "user", str(_customer["id"]), clean_email,
+    )
     result = "created" if created else "exists"
     return RedirectResponse(f"/admin/customers?onboarded={result}", status_code=303)
 
@@ -911,8 +1338,10 @@ def admin_create_customer(
 def admin_update_customer(
     request: Request,
     user_id: int,
+    plan: str = Form(),
     monthly_job_limit: int = Form(),
     max_minutes_per_job: float = Form(),
+    max_images_per_job: int = Form(),
     status: str = Form(),
     csrf: str = Form(),
 ):
@@ -927,15 +1356,25 @@ def admin_update_customer(
         return HTMLResponse("Monthly limit must be between 0 and 10,000", status_code=400)
     if not 0.5 <= max_minutes_per_job <= 600:
         return HTMLResponse("Duration limit must be between 0.5 and 600 minutes", status_code=400)
+    if plan not in PLANS:
+        return HTMLResponse("Invalid customer plan", status_code=400)
+    if not 1 <= max_images_per_job <= 48:
+        return HTMLResponse("Image limit must be between 1 and 48", status_code=400)
     if status not in {"active", "suspended"}:
         return HTMLResponse("Invalid account status", status_code=400)
     database.update_user_limits(
         user_id,
+        plan=plan,
         monthly_job_limit=monthly_job_limit,
         max_minutes_per_job=max_minutes_per_job,
+        max_images_per_job=max_images_per_job,
         status=status,
     )
-    return RedirectResponse("/admin/customers", status_code=303)
+    database.record_audit(
+        int(current_user(request)["id"]), "customer.limits_updated", "user",
+        str(user_id), f"plan={plan}; status={status}; jobs={monthly_job_limit}; minutes={max_minutes_per_job}; images={max_images_per_job}",
+    )
+    return RedirectResponse(f"/admin/customers/{user_id}?saved=1", status_code=303)
 
 
 @app.post("/jobs/{job_id}/retry")
@@ -947,6 +1386,12 @@ def retry(request: Request, job_id: int, csrf: str = Form()):
     job, _ = owned_job(request, job_id)
     if not job:
         return HTMLResponse("Job not found", status_code=404)
+    user = current_user(request)
+    if user["role"] == "creator" and job["kind"] == "automatic" and job["status"] == "failed":
+        if database.monthly_job_usage(int(user["id"])) >= int(user["monthly_job_limit"]):
+            return HTMLResponse("You have used all videos included in your current plan.", status_code=409)
+        if database.active_job_count(int(user["id"])) >= MAX_ACTIVE_CREATOR_JOBS:
+            return HTMLResponse("Wait for your current video to finish before trying again.", status_code=409)
     database.retry_job(job_id)
     return RedirectResponse(f"/jobs/{job_id}", status_code=303)
 

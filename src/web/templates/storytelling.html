@@ -1,40 +1,34 @@
 {% extends 'base.html' %}
 {% block content %}
 <div class="page-heading">
-  <div><p class="eyebrow">Creation workflow</p><h1>Storytelling</h1><p>Generate a narrated story with original visuals, synchronized captions, and a thumbnail.</p></div>
+  <div><p class="eyebrow">Create a video</p><h1>What story should we make?</h1><p>Enter an idea and choose the length. We will create the story, voice, images, captions, sound, thumbnail, and final video.</p></div>
 </div>
-{% if remaining is none %}<div class="usage-strip"><span>Administrator workspace</span><strong>{{ usage }} stories this month</strong><span>No creator limit applied</span></div>{% else %}<div class="usage-strip"><span>{{ usage }} of {{ current_user.monthly_job_limit }} monthly stories used</span><strong>{{ remaining }} remaining</strong><span>Up to {{ current_user.max_minutes_per_job|int }} minutes each</span></div>{% endif %}
+{% if remaining is none %}<div class="usage-strip"><span>Administrator workspace</span><strong>{{ usage }} stories in the last 30 days</strong><span>No creator limit applied</span></div>{% else %}<div class="usage-strip"><span>{{ usage }} of {{ current_user.monthly_job_limit }} stories used in the last 30 days</span><strong>{{ remaining }} remaining</strong><span>{{ current_user.plan|title }} · up to {{ current_user.max_minutes_per_job|int }} minutes · {{ current_user.max_images_per_job }} images</span></div>{% endif %}
 
 <div class="content-grid form-layout">
   <section class="panel">
-    <div class="section-heading"><div><h2>Create storytelling video</h2><p>Only the duration is required. Blank content fields are generated automatically.</p></div></div>
+    <div class="section-heading"><div><h2>Start with your idea</h2><p>You can leave the idea blank if you want us to suggest one.</p></div></div>
     <form method="post" action="/jobs/automatic" class="studio-form">
       <input type="hidden" name="csrf" value="{{ csrf }}">
-      <label>Story topic or niche <span>Optional</span><textarea name="topic" placeholder="For example: A baker discovers a tiny moon in a flour sack"></textarea></label>
-      <div class="field-row">
-        <label>Duration in minutes<input name="minutes" type="number" min="0.5" max="{{ current_user.max_minutes_per_job }}" step="0.5" value="2" required></label>
-        <label>Schedule in UTC <span>Optional</span><input type="datetime-local" name="scheduled_at"></label>
-      </div>
-      <label>Post title <span>Optional</span><input name="title" placeholder="Generated automatically when blank"></label>
-      <label>Description <span>Optional</span><textarea name="description" placeholder="Generated automatically when blank"></textarea></label>
-      <label>Hashtags <span>Optional</span><input name="hashtags" placeholder="#SleepStory #Bedtime"></label>
-      <p class="form-note">Publishing is handled later from Social Posts, after you review the finished video.</p>
-      <button class="button primary" type="submit" {{ 'disabled' if remaining is not none and remaining <= 0 else '' }}>Generate storytelling video</button>
+      <label>What is the story about? <span>Optional</span><textarea name="topic" data-topic-input placeholder="For example: A baker finds a tiny moon inside a bag of flour"></textarea></label>
+      <div class="prompt-helper"><strong>Idea starters for your niche</strong><p>Choose one, then change the character, setting or unanswered question to make it yours.</p><div class="prompt-chips">{% for prompt in prompt_starters %}<button type="button" data-prompt-starter="{{ prompt }}">{{ prompt }}</button>{% endfor %}</div></div>
+      <label>How long should the video be?<input name="minutes" type="number" min="0.5" max="{{ current_user.max_minutes_per_job }}" step="0.5" value="{{ current_user.default_story_minutes }}" required><span>Enter the number of minutes. Your plan allows up to {{ current_user.max_minutes_per_job|int }}.</span></label>
+      <details class="advanced-options"><summary>More options</summary><div class="studio-form"><label>Make it later <span data-local-timezone>Uses your device time</span><input type="datetime-local" name="scheduled_at" data-local-schedule></label><label>Video title <span>We create one when blank</span><input name="title"></label><label>Video description <span>We create one when blank</span><textarea name="description"></textarea></label><label>Hashtags <span>Optional</span><input name="hashtags" placeholder="#SleepStory #Bedtime"></label></div></details>
+      <p class="form-note">Voice: {{ voice_options[current_user.narration_voice] }}. <a href="/settings">Choose another voice</a>.</p>
+      <button class="button primary" type="submit" {{ 'disabled' if remaining is not none and remaining <= 0 else '' }}>Create my video</button>
     </form>
   </section>
   <aside class="panel workflow-note">
-    <p class="eyebrow">Automatic flow</p>
+    <p class="eyebrow">What happens next</p>
     <ol class="step-list">
-      <li><span>1</span><div><strong>Simple original story</strong><small>Gemini writes clear, audience-aware narration.</small></div></li>
-      <li><span>2</span><div><strong>Voice and timing</strong><small>Narration timing drives captions and scene pacing.</small></div></li>
-      <li><span>3</span><div><strong>Scenes and sound</strong><small>Cloudflare visuals and optional quiet effects support the story.</small></div></li>
-      <li><span>4</span><div><strong>Finished media</strong><small>The MP4 and thumbnail appear in the shared library.</small></div></li>
+      <li><span>1</span><div><strong>We write the story</strong><small>Clear words, one story, and a complete ending.</small></div></li><li><span>2</span><div><strong>We create the voice</strong><small>The voice sets the timing for every caption.</small></div></li><li><span>3</span><div><strong>We make each scene</strong><small>Images, movement, and sound follow important moments.</small></div></li><li><span>4</span><div><strong>Your video becomes ready</strong><small>Watch it, download it, and then choose whether to publish.</small></div></li>
     </ol>
+    <div class="outcome-tips"><strong>Make viewers curious</strong><ul><li>Start with one unusual situation, not a broad subject.</li><li>Use simple words and one clear emotional promise.</li><li>Give the story a question the ending can honestly answer.</li><li>Write for {{ current_user.target_audience or 'one specific audience' }}.</li></ul><a href="/settings">Edit your niche and audience</a></div>
   </aside>
 </div>
 
 <section class="panel">
-  <div class="section-heading"><div><h2>Recent storytelling jobs</h2><p>Generation status updates automatically.</p></div><a href="/jobs?workflow=storytelling">View all</a></div>
+  <div class="section-heading"><div><h2>Your recent story videos</h2><p>This list updates while your video is being created.</p></div><a href="/jobs?workflow=storytelling">View all</a></div>
   {% include '_job_table.html' %}
 </section>
 {% endblock %}

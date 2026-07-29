@@ -34,6 +34,16 @@ class JobCancelled(Exception):
     pass
 
 
+def notify_creator(user_id: int | None, message: str) -> None:
+    if not user_id:
+        return
+    try:
+        database.add_notification(int(user_id), "job", message)
+    except Exception:
+        # Notifications are secondary and must not change the job result.
+        pass
+
+
 def newest_video(before: set[Path]) -> Path:
     candidates = [p for p in VIDEOS_DIR.glob("*.mp4") if p not in before]
     if not candidates:
@@ -71,7 +81,14 @@ def run_automatic(job, log_file) -> Path:
         command.extend(["--resume-script", str(script_path)])
     else:
         command.extend([job["topic"], str(job["minutes"])])
-    command.extend(["--title", job["title"]])
+    command.extend([
+        "--title", job["title"],
+        "--voice", job.get("narration_voice") or "Kore",
+        "--max-images", str(job.get("max_images") or 8),
+        "--niche", job.get("creator_niche") or "",
+        "--audience", job.get("target_audience") or "",
+        "--content-style", job.get("content_style") or "cinematic",
+    ])
     process = subprocess.Popen(
         command,
         cwd=BASE_DIR, stdout=log_file, stderr=subprocess.STDOUT, start_new_session=True,
@@ -164,6 +181,8 @@ def process_job(job) -> None:
                         title=job["title"] or "",
                         description=job["description"] or "",
                         hashtags=job["hashtags"] or "",
+                        niche=job.get("creator_niche") or "",
+                        audience=job.get("target_audience") or "",
                     )
                     if database.cancellation_requested(job["id"]):
                         raise JobCancelled
@@ -213,6 +232,10 @@ def process_job(job) -> None:
                 if database.cancellation_requested(job["id"]):
                     raise JobCancelled
                 database.update_job(job["id"], "completed", video_path=remote_video)
+                notify_creator(
+                    job.get("owner_id"),
+                    f"Video #{job.get('owner_job_number') or job['id']} is ready to watch.",
+                )
                 if generated_video:
                     cleanup_generated_media(generated_video)
                 return
@@ -232,6 +255,10 @@ def process_job(job) -> None:
             if database.cancellation_requested(job["id"]):
                 raise JobCancelled
             database.update_job(job["id"], "waiting_for_connections" if waiting else "published")
+            notify_creator(
+                job.get("owner_id"),
+                f"Video #{job.get('owner_job_number') or job['id']} is finished.",
+            )
             if generated_video:
                 cleanup_generated_media(generated_video)
     except JobCancelled:
@@ -246,10 +273,22 @@ def process_job(job) -> None:
                     pass
     except (OSError, subprocess.CalledProcessError, RuntimeError) as exc:
         database.update_job(job["id"], "failed", error=str(exc))
+        notify_creator(
+            job.get("owner_id"),
+            f"Video #{job.get('owner_job_number') or job['id']} could not be finished. It did not use one of your plan videos, and you can try again.",
+        )
 
 
 def worker_loop(stop_event: threading.Event) -> None:
+    next_maintenance = 0.0
     while not stop_event.is_set():
+        if time.monotonic() >= next_maintenance:
+            try:
+                database.create_expiry_notifications()
+            except Exception:
+                # A reminder failure must never stop story processing.
+                pass
+            next_maintenance = time.monotonic() + 3600
         job = database.claim_job()
         if job:
             process_job(job)

@@ -22,9 +22,11 @@
   <meta property="og:image:alt" content="Thumbnail for {{ job.title }}">
   <meta name="twitter:image" content="{{ request.url_for('public_share_thumbnail', token=token) }}">
   {% endif %}
-  <link rel="stylesheet" href="/static/style.css?v=20260726-3">
+  <script src="/static/theme.js?v=20260729-4"></script>
+  <link rel="stylesheet" href="/static/style.css?v=20260729-4">
 </head>
 <body>
+  <button class="theme-toggle" type="button" data-theme-toggle aria-label="Switch to dark mode">☾ Dark</button>
   <main class="auth-shell">
     <div class="public-share-shell">
       <header class="public-share-header"><span class="brand-mark">S</span><strong>Sleep Studio</strong><span>Shared video</span></header>

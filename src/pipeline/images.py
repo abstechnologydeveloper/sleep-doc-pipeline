@@ -31,7 +31,7 @@ from project_paths import IMAGES_DIR, PROJECT_ROOT, SCRIPTS_DIR
 CLOUDFLARE_MODEL = "@cf/leonardo/lucid-origin"
 FAST_IMAGE_MODEL = "@cf/black-forest-labs/flux-1-schnell"
 WORDS_PER_SCENE = 50  # roughly six images per two minutes at 150 words/minute
-DEFAULT_MAX_STORY_IMAGES = 120
+DEFAULT_MAX_STORY_IMAGES = 48
 MAX_RETRIES = 5
 RETRY_BASE_DELAY = 10  # seconds, doubles each retry
 
@@ -237,18 +237,47 @@ def valid_dynamic_plan(plan: object, text: str) -> bool:
     )
 
 
+def cap_distinct_scenes(scenes: list[dict], max_images: int) -> int:
+    """Keep all timed beats while capping how many paid images are generated."""
+    distinct_count = 0
+    last_distinct_id = None
+    root_by_id: dict[str, str] = {}
+    for scene in scenes:
+        scene_id = scene["id"]
+        reused = scene.get("reuse_scene_id")
+        if reused:
+            root = root_by_id.get(reused, reused)
+            scene["reuse_scene_id"] = root
+            root_by_id[scene_id] = root
+            continue
+        if distinct_count < max_images:
+            distinct_count += 1
+            last_distinct_id = scene_id
+            root_by_id[scene_id] = scene_id
+        elif last_distinct_id:
+            scene["reuse_scene_id"] = last_distinct_id
+            root_by_id[scene_id] = last_distinct_id
+    return distinct_count
+
+
 def create_dynamic_visual_plan(
     text: str,
     title: str,
     api_key: str,
     plan_path: Path,
     max_images: int,
+    preferred_style: str = "cinematic",
 ) -> dict:
     """Plan visuals around narrative events rather than a words-per-image ratio."""
     if plan_path.is_file():
         try:
             saved_plan = json.loads(plan_path.read_text(encoding="utf-8"))
             if valid_dynamic_plan(saved_plan, text):
+                cap_distinct_scenes(saved_plan["scenes"], max_images)
+                plan_path.write_text(
+                    json.dumps(saved_plan, ensure_ascii=False, indent=2) + "\n",
+                    encoding="utf-8",
+                )
                 print("Using saved dynamic story scene plan.")
                 return saved_plan
             # Preserve resumability for projects created by the original fixed-ratio planner.
@@ -270,15 +299,19 @@ important character, emotion, clue, discovery, decision, or story direction chan
 continuous calm passage together when the same visual can honestly represent it. Every
 numbered narration segment must belong to exactly one scene, in order, without gaps or
 overlaps. Never split a numbered segment.
+Give each important setup, clue, reveal, relationship turn, character decision, climax action,
+payoff, and final emotional resolution an honest matching visual beat. Do not use a generic
+atmosphere image when the narration describes a specific meaningful action.
 
-The hard paid-image limit is {max_images}. Do not skip an important storyline to fit the
-limit. If the story genuinely needs more than {max_images} distinct visuals, set
-budget_sufficient to false and required_scene_count to your honest estimate. Otherwise use
-the fewest scenes that fully and clearly represent every meaningful narrative beat. A scene
-may reuse an earlier image only when the location, characters, clothing, visible action, and
-emotional purpose remain substantially the same; set reuse_scene_id to that earlier ID.
+The hard paid-image limit is {max_images}. You must stay within it. Preserve every narrative
+beat as a timed scene, but consolidate nearby events into stronger compositions and reuse the
+closest suitable earlier visual with a different camera movement when a new paid image would
+exceed the limit. Never report the budget as insufficient. A scene may reuse an earlier image
+by setting reuse_scene_id to that earlier ID.
 
-Infer the audience and choose a fitting coherent visual medium: realistic cinema for adult
+The creator's preferred visual direction is {preferred_style}. Honor it when it suits the
+story and audience, while keeping age and safety appropriate. Infer the audience and choose
+a fitting coherent visual medium: realistic cinema for adult
 realistic stories, age-appropriate 2D or 3D animation for children, historical realism,
 fantasy illustration, gentle gothic suspense, nature documentary, or another suitable style.
 Never imitate a named artist, studio, franchise, or copyrighted character.
@@ -327,22 +360,8 @@ Return JSON only with:
             ),
         )
         raw_plan = json.loads(response.text or "")
-        required = int(raw_plan.get("required_scene_count", 0))
-        if raw_plan.get("budget_sufficient") is False or required > max_images:
-            raise ImageBudgetExceeded(
-                f"This story needs approximately {required or 'more'} distinct images, "
-                f"which exceeds MAX_STORY_IMAGES={max_images}. Increase the limit "
-                "before making paid image requests."
-            )
         scenes = materialize_scenes(raw_plan.get("scenes"), segments)
-        distinct_scene_count = sum(
-            not scene.get("reuse_scene_id") for scene in scenes
-        )
-        if distinct_scene_count > max_images:
-            raise ImageBudgetExceeded(
-                f"The dynamic storyboard needs {distinct_scene_count} distinct images, exceeding "
-                f"MAX_STORY_IMAGES={max_images}."
-            )
+        distinct_scene_count = cap_distinct_scenes(scenes, max_images)
         hook = " ".join(
             str(raw_plan.get("thumbnail_hook", "")).strip().strip('"\'').split()[:5]
         ).upper()
@@ -637,6 +656,17 @@ def main() -> None:
         default="",
         help="Optional post title used to compose the dedicated thumbnail",
     )
+    parser.add_argument(
+        "--max-images",
+        type=int,
+        default=None,
+        help="Maximum number of distinct paid scene images",
+    )
+    parser.add_argument(
+        "--content-style",
+        default="cinematic",
+        help="Creator's preferred visual direction",
+    )
     args = parser.parse_args()
 
     script_path = select_script(args.script_path)
@@ -665,13 +695,14 @@ def main() -> None:
     if not text.strip():
         raise SystemExit("The selected script is empty.")
     try:
-        max_story_images = int(
+        max_story_images = args.max_images or int(
             os.getenv("MAX_STORY_IMAGES", str(DEFAULT_MAX_STORY_IMAGES))
         )
     except ValueError as exc:
         raise SystemExit("MAX_STORY_IMAGES must be a positive integer.") from exc
     if max_story_images < 1:
         raise SystemExit("MAX_STORY_IMAGES must be a positive integer.")
+    max_story_images = min(max_story_images, DEFAULT_MAX_STORY_IMAGES)
 
     image_dir = IMAGES_DIR / script_path.stem
     image_dir.mkdir(parents=True, exist_ok=True)
@@ -687,6 +718,7 @@ def main() -> None:
         gemini_api_key,
         plan_path,
         max_story_images,
+        args.content_style,
     )
 
     if visual_plan.get("version") == PLAN_VERSION:

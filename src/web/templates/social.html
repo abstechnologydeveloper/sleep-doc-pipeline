@@ -1,17 +1,17 @@
 {% extends 'base.html' %}
 {% block content %}
 <div class="page-heading">
-  <div><p class="eyebrow">Shared publishing</p><h1>Social Posts</h1><p>Upload finished media or publish any completed video from one workspace.</p></div>
+  <div><p class="eyebrow">Publish</p><h1>Share your finished videos</h1><p>Choose a completed video, add the post details, and send it to a connected channel.</p></div>
 </div>
 {% if error %}<div class="alert error" role="alert">{{ error }}</div>{% endif %}
 
 <div class="content-grid social-layout">
   <section class="panel span-two">
-    <div class="section-heading"><div><h2>Media library</h2><p>Generated stories and finished uploads available for publishing.</p></div></div>
+    <div class="section-heading"><div><h2>Your video library</h2><p>Story videos and uploads that are ready to use.</p></div></div>
     {% include '_media_grid.html' %}
   </section>
   <section class="panel">
-    <div class="section-heading"><div><h2>Add finished video</h2><p>Store an MP4, MOV, or M4V in the shared library.</p></div></div>
+    <div class="section-heading"><div><h2>Upload your own video</h2><p>Choose a video file from your phone or computer.</p></div></div>
     <form method="post" action="/media/upload" enctype="multipart/form-data" class="studio-form">
       <input type="hidden" name="csrf" value="{{ csrf }}">
       <label>Video file<input type="file" name="video" accept="video/mp4,video/quicktime,video/x-m4v" required></label>
@@ -25,10 +25,10 @@
 
 <div class="content-grid social-layout">
   <section class="panel span-two">
-    <div class="section-heading"><div><h2>Create social post</h2><p>Select finished media, then customize its publishing details.</p></div></div>
+    <div class="section-heading"><div><h2>Send a video to your channel</h2><p>Choose a video and check the details before publishing.</p></div></div>
     <form method="post" action="/social/posts" class="studio-form">
       <input type="hidden" name="csrf" value="{{ csrf }}">
-      <label>Video from media library
+      <label>Choose a finished video
         <select name="media_job_id" required>
           <option value="">Choose a finished video</option>
           {% for item in media_items %}<option value="{{ item.id }}">#{{ item.id }} — {{ item.title }}</option>{% endfor %}
@@ -36,13 +36,11 @@
       </label>
       <label>Post title <span>Uses the media title when blank</span><input name="title"></label>
       <label>Description <span>Uses the media description when blank</span><textarea name="description"></textarea></label>
-      <div class="field-row"><label>Hashtags <span>Optional</span><input name="hashtags"></label><label>Schedule in UTC <span>Optional</span><input type="datetime-local" name="scheduled_at"></label></div>
-      <fieldset><legend>Publishing platforms</legend><div class="platform-options">{% for platform in platforms %}<label class="check"><input type="checkbox" name="{{ platform }}"><span>{{ platform|title }}</span></label>{% endfor %}</div></fieldset>
-      <button class="button primary" type="submit" {{ 'disabled' if not media_items else '' }}>Create social post</button>
+      <div class="field-row"><label>Hashtags <span>Optional</span><input name="hashtags"></label><label>Publish later <span data-local-timezone>Uses your device time</span><input type="datetime-local" name="scheduled_at" data-local-schedule></label></div><fieldset><legend>Choose a channel</legend><div class="platform-options">{% for platform in platforms %}<label class="check {{ 'unavailable-option' if not platform.available else '' }}"><input type="checkbox" name="{{ platform.name }}" {{ 'disabled' if not platform.available else '' }}><span>{{ platform.name|title }}{% if not platform.available %} — unavailable{% endif %}</span></label>{% endfor %}</div></fieldset><button class="button primary" type="submit" {{ 'disabled' if not media_items else '' }}>Publish video</button>
     </form>
   </section>
   <section class="panel">
-    <div class="section-heading"><div><h2>Connections</h2><p>Posts wait safely when an official connector is unavailable.</p></div></div>
+    <div class="section-heading"><div><h2>Connected channels</h2><p>Connect YouTube before you try to publish.</p></div></div>
     {% include '_connectors.html' %}
   </section>
 </div>

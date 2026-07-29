@@ -7,26 +7,26 @@
   </div>
   <div class="table-wrap">
   <table class="job-table">
-    <thead><tr><th class="select-column"><input type="checkbox" data-select-all aria-label="Select all visible jobs"></th><th>Job</th><th>Workflow</th><th>Title</th><th>Status</th><th>Created</th><th></th></tr></thead>
+    <thead><tr><th class="select-column"><input type="checkbox" data-select-all aria-label="Select all visible videos"></th><th>No.</th><th>Type</th><th>Video</th><th>Progress</th><th>Started</th><th></th></tr></thead>
     <tbody>
     {% for job in jobs %}
       <tr data-job-id="{{ job.id }}">
-        <td class="select-column"><input type="checkbox" name="job_ids" value="{{ job.id }}" data-job-select aria-label="Select job {{ job.id }}"></td>
-        <td><a href="/jobs/{{ job.id }}">#{{ job.id }}</a></td>
+        <td class="select-column"><input type="checkbox" name="job_ids" value="{{ job.id }}" data-job-select aria-label="Select job {{ job.owner_job_number or job.id }}"></td>
+        <td><a href="/jobs/{{ job.id }}">#{{ job.owner_job_number or job.id }}</a></td>
         <td>
           {% if job.kind == 'automatic' %}Storytelling
           {% elif job.platforms == '[]' %}Uploaded Media
           {% else %}Social Post{% endif %}
         </td>
         <td data-job-title>{{ job.title or 'Preparing…' }}</td>
-        <td><span class="status status-{{ job.status }}" data-job-status>{{ job.status|replace('_', ' ')|title }}</span></td>
+        <td><span class="status status-{{ job.status }}" data-job-status>{{ job.status|friendly_status }}</span></td>
         <td class="muted">{{ job.created_at[:16]|replace('T', ' ') }}</td>
         <td class="row-actions">
           <button class="row-delete" type="submit" formaction="/jobs/{{ job.id }}/delete" onclick="return confirm('{{ 'Cancel and delete this running job?' if job.status in ['processing','publishing','cancel_requested'] else 'Delete this job?' }}')">{{ 'Cancel' if job.status in ['processing','publishing','cancel_requested'] else 'Delete' }}</button>
         </td>
       </tr>
     {% else %}
-      <tr><td colspan="7" class="empty-state">No jobs match this view.</td></tr>
+      <tr><td colspan="7" class="empty-state"><strong>No videos here yet.</strong><br>Create a story video to see it here.</td></tr>
     {% endfor %}
     </tbody>
   </table>

@@ -1,17 +1,17 @@
 {% extends 'base.html' %}
 {% block content %}
 <span data-job-detail-id="{{ job.id }}" hidden></span>
-<div class="breadcrumbs"><a href="/jobs">Jobs</a><span>/</span><span>#{{ job.id }}</span></div>
+<div class="breadcrumbs"><a href="/jobs">Jobs</a><span>/</span><span>#{{ job.owner_job_number or job.id }}</span></div>
 <div class="page-heading job-heading">
-  <div><p class="eyebrow">Job #{{ job.id }}</p><h1 data-job-detail-title>{{ job.title or 'Preparing job' }}</h1><p>{% if job.kind == 'automatic' %}Storytelling{% elif job.platforms == '[]' %}Uploaded Media{% else %}Social Post{% endif %}</p></div>
-  <span class="status status-{{ job.status }}" data-job-detail-status>{{ job.status|replace('_', ' ')|title }}</span>
+  <div><p class="eyebrow">Job #{{ job.owner_job_number or job.id }}</p><h1 data-job-detail-title>{{ job.title or 'Preparing job' }}</h1><p>{% if job.kind == 'automatic' %}Storytelling{% elif job.platforms == '[]' %}Uploaded Media{% else %}Social Post{% endif %}</p></div>
+  <span class="status status-{{ job.status }}" data-job-detail-status>{{ job.status|friendly_status }}</span>
 </div>
 
-{% if job.error %}<div class="alert error"><strong>Job error</strong><span>{{ job.error }}</span></div>{% endif %}
+{% if job.error %}<div class="alert error"><strong>We could not finish this video.</strong><span>{% if is_admin %}{{ job.error }}{% else %}Please try again. If it still fails, contact support and mention video #{{ job.owner_job_number or job.id }}.{% endif %}</span></div>{% endif %}
 
 <div class="content-grid job-layout">
   <section class="panel span-two">
-    <div class="section-heading"><div><h2>Output</h2><p>Review generated or uploaded media.</p></div></div>
+    <div class="section-heading"><div><h2>Your video</h2><p>Watch the result and download the files you need.</p></div></div>
     {% if job.video_path %}
       <video class="video-player" controls preload="metadata" src="/jobs/{{ job.id }}/video"></video>
       <div class="action-row"><a class="button primary" href="/jobs/{{ job.id }}/video" download>Download video</a>{% if thumbnail_ready %}<a class="button secondary" href="/jobs/{{ job.id }}/thumbnail" download>Download thumbnail</a>{% endif %}</div>
@@ -29,35 +29,33 @@
       </div>
       {% endif %}
     {% else %}
-      <div class="processing-state"><span class="spinner"></span><strong>Output is not ready yet</strong><p>This page will refresh automatically when the video becomes available.</p></div>
+      <div class="processing-state"><span class="spinner"></span><strong>{{ job.status|friendly_status }}</strong><p>You can leave this page. It will update automatically.</p></div>
     {% endif %}
   </section>
   <aside class="panel">
     <div class="section-heading"><div><h2>Details</h2></div></div>
     <dl class="detail-list">
-      <dt>Status</dt><dd data-job-detail-status-text>{{ job.status|replace('_', ' ')|title }}</dd>
-      <dt>Workflow</dt><dd>{% if job.kind == 'automatic' %}Storytelling{% elif job.platforms == '[]' %}Uploaded Media{% else %}Social Post{% endif %}</dd>
+      <dt>Progress</dt><dd data-job-detail-status-text>{{ job.status|friendly_status }}</dd><dt>Type</dt><dd>{% if job.kind == 'automatic' %}Story video{% elif job.platforms == '[]' %}Uploaded video{% else %}Social post{% endif %}</dd>
       {% if job.topic %}<dt>Topic</dt><dd>{{ job.topic }}</dd>{% endif %}
       {% if job.minutes %}<dt>Duration</dt><dd>{{ job.minutes }} minutes</dd>{% endif %}
-      <dt>Created</dt><dd>{{ job.created_at[:19]|replace('T', ' ') }} UTC</dd>
-      {% if job.scheduled_at %}<dt>Scheduled</dt><dd>{{ job.scheduled_at[:19]|replace('T', ' ') }} UTC</dd>{% endif %}
+      <dt>Started</dt><dd><time data-utc-time="{{ job.created_at }}">{{ job.created_at[:19]|replace('T', ' ') }}</time></dd>{% if job.scheduled_at %}<dt>Starts later</dt><dd><time data-utc-time="{{ job.scheduled_at }}">{{ job.scheduled_at[:19]|replace('T', ' ') }}</time></dd>{% endif %}
     </dl>
   </aside>
 </div>
 
 <div class="content-grid job-layout">
   <section class="panel span-two">
-    <div class="section-heading"><div><h2>Publishing</h2><p>Platform-specific delivery status.</p></div></div>
+    <div class="section-heading"><div><h2>Publishing</h2><p>See whether this video was sent to your channel.</p></div></div>
     <div class="connector-list">
     {% for item in publications %}
-      <div class="connector-row"><span class="platform-mark">{{ item.platform[0]|upper }}</span><span><strong>{{ item.platform|title }}</strong>{% if item.error %}<small>{{ item.error }}</small>{% endif %}</span><span class="status status-{{ item.status }}">{{ item.status|title }}</span></div>
+      <div class="connector-row"><span class="platform-mark">{{ item.platform[0]|upper }}</span><span><strong>{{ item.platform|title }}</strong>{% if item.error %}<small>{{ item.error if is_admin else 'This channel needs attention before the video can be sent.' }}</small>{% endif %}</span><span class="status status-{{ item.status }}">{{ item.status|friendly_status }}</span></div>
     {% else %}<div class="empty-panel">No publishing platforms were selected.</div>{% endfor %}
     </div>
   </section>
   <aside class="panel danger-panel">
     <div class="section-heading"><div><h2>Job actions</h2><p>Retry failures or remove work you no longer need.</p></div></div>
     {% if job.status in ['failed','waiting_for_connections'] %}<form method="post" action="/jobs/{{ job.id }}/retry"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="button secondary" type="submit">Retry job</button></form>{% endif %}
-    <form method="post" action="/jobs/{{ job.id }}/delete" onsubmit="return confirm('Delete this job? A running generation will be cancelled.')"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="button danger" type="submit">{{ 'Cancel and delete job' if job.status in ['processing','publishing','cancel_requested'] else 'Delete job' }}</button></form>
+    <form method="post" action="/jobs/{{ job.id }}/delete" onsubmit="return confirm('Delete this video? Work in progress will be stopped.')"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="button danger" type="submit">{{ 'Stop and delete video' if job.status in ['processing','publishing','cancel_requested'] else 'Delete video' }}</button></form>
   </aside>
 </div>
 {% endblock %}

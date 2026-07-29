@@ -4,35 +4,38 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>{{ title or 'Sleep Studio' }}</title>
-  <link rel="stylesheet" href="/static/style.css?v=20260728-1">
-  <script defer src="/static/jobs.js?v=20260728-1"></script>
+  <script src="/static/theme.js?v=20260729-4"></script>
+  <link rel="stylesheet" href="/static/style.css?v=20260729-4">
+  <script defer src="/static/jobs.js?v=20260729-4"></script>
 </head>
 <body>
+<button class="theme-toggle" type="button" data-theme-toggle aria-label="Switch to dark mode">☾ Dark</button>
 {% if current_user %}
   <div class="app-shell">
     <aside class="sidebar" id="studio-sidebar">
       <a class="brand" href="/app">
         <span class="brand-mark">S</span>
-        <span><strong>Sleep Studio</strong><small>Content workspace</small></span>
+        <span><strong>Sleep Studio</strong><small>{{ 'Admin control room' if is_admin else 'Story video creator' }}</small></span>
       </a>
       <nav aria-label="Studio navigation">
         <a class="nav-item {{ 'active' if active_section == 'overview' else '' }}" href="/app">
-          <span class="nav-icon">O</span><span>Overview</span>
+          <span class="nav-icon">H</span><span>{{ 'Dashboard' if is_admin else 'Home' }}</span>
         </a>
         {% if not is_admin %}<a class="nav-item {{ 'active' if active_section == 'storytelling' else '' }}" href="/storytelling">
-          <span class="nav-icon">S</span><span>Storytelling</span>
-        </a>
-        <a class="nav-item {{ 'active' if active_section == 'ambient' else '' }}" href="/ambient">
-          <span class="nav-icon">A</span><span>Ambient Video</span><small class="nav-tag">Soon</small>
+          <span class="nav-icon">+</span><span>Create Video</span>
         </a>
         <a class="nav-item {{ 'active' if active_section == 'social' else '' }}" href="/social">
-          <span class="nav-icon">P</span><span>Social Posts</span>
+          <span class="nav-icon">P</span><span>Publish</span>
+        </a>
+        {% if not is_admin %}<a class="nav-item {{ 'active' if active_section == 'notifications' else '' }}" href="/notifications"><span class="nav-icon">N</span><span>Updates</span></a>{% endif %}
+        <a class="nav-item {{ 'active' if active_section == 'settings' else '' }}" href="/settings">
+          <span class="nav-icon">A</span><span>Account</span>
         </a>
         {% endif %}
         <a class="nav-item {{ 'active' if active_section == 'jobs' else '' }}" href="/jobs">
-          <span class="nav-icon">J</span><span>Jobs</span>
+          <span class="nav-icon">V</span><span>{{ 'All Jobs' if is_admin else 'My Videos' }}</span>
         </a>
-        {% if is_admin %}<a class="nav-item {{ 'active' if active_section == 'customers' else '' }}" href="/admin/customers"><span class="nav-icon">C</span><span>Customers</span></a>{% endif %}
+        {% if is_admin %}<a class="nav-item {{ 'active' if active_section == 'customers' else '' }}" href="/admin/customers"><span class="nav-icon">C</span><span>Customers</span></a><a class="nav-item {{ 'active' if active_section == 'payments' else '' }}" href="/admin/payments"><span class="nav-icon">₦</span><span>Payments</span></a><a class="nav-item {{ 'active' if active_section == 'usage' else '' }}" href="/admin/usage"><span class="nav-icon">U</span><span>Usage</span></a><a class="nav-item {{ 'active' if active_section == 'audit' else '' }}" href="/admin/audit"><span class="nav-icon">L</span><span>Activity Log</span></a>{% endif %}
       </nav>
       <div class="sidebar-footer">
         <div class="admin-identity"><span class="avatar">{{ (current_user.name or current_user.email)[0]|upper }}</span><span><strong>{{ current_user.name or current_user.email }}</strong><small>{% if is_admin %}Administrator{% else %}{{ current_user.plan|title }} creator{% endif %}</small></span></div>

@@ -17,6 +17,8 @@ def generate_post_metadata(
     title: str = "",
     description: str = "",
     hashtags: str = "",
+    niche: str = "",
+    audience: str = "",
 ) -> dict[str, str]:
     """Fill missing concept and post fields while preserving supplied values."""
     supplied = {
@@ -38,12 +40,20 @@ for a storytelling YouTube channel. Give it a clear character, goal, curiosity h
 small discoveries instead of relying only on atmosphere. It may be playful, cozy, historical,
 mysterious, gently eerie, for children, or for adults, but never graphic, loud, childish when
 the audience is adult, or based closely on an existing copyrighted story.
+The central problem, title promise, thumbnail idea, and eventual resolution must describe the
+same story. Prefer a premise with a natural cause-and-effect journey, a meaningful choice, and
+room to pay off the opening question instead of a mood-only concept.
 
 Existing values must be preserved when present:
 - topic: {supplied['topic'] or '(generate this)'}
 - title: {supplied['title'] or '(generate this)'}
 - description: {supplied['description'] or '(generate this)'}
 - hashtags: {supplied['hashtags'] or '(generate this)'}
+
+Creator profile guidance:
+- niche: {niche or 'general storytelling'}
+- target audience: {audience or 'a general storytelling audience'}
+Use this guidance when generating missing fields, but do not mention the profile itself.
 
 Return one JSON object with string fields named topic, title, description, and hashtags.
 The topic should be one specific story premise written in plain everyday English. The title

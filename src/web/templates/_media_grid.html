@@ -10,10 +10,10 @@
     </a>
     <div class="media-copy">
       <strong>{{ item.title or 'Untitled video' }}</strong>
-      <small>{{ 'Storytelling' if item.kind == 'automatic' else 'Uploaded video' }} · Job #{{ item.id }}</small>
+      <small>{{ 'Story video' if item.kind == 'automatic' else 'Uploaded video' }} · #{{ item.owner_job_number or item.id }}</small>
     </div>
   </article>
 {% else %}
-  <div class="empty-panel">No finished videos are available yet.</div>
+  <div class="empty-panel"><strong>No finished videos yet.</strong><br>Your completed story videos will appear here.</div>
 {% endfor %}
 </div>

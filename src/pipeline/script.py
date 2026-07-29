@@ -19,9 +19,22 @@ WORDS_PER_CHUNK = 2_200
 WORDS_PER_MINUTE = 150
 MINIMUM_WORD_RATIO = 0.9
 WORD_PATTERN = re.compile(r"\b[\w]+(?:[’'-][\w]+)*\b", flags=re.UNICODE)
+HEADING_PATTERN = re.compile(
+    r"^(?:chapter|part|section)\s+(?:\d+|[ivxlcdm]+)\b|^(?:introduction|conclusion)\s*$",
+    flags=re.IGNORECASE,
+)
 
 
-def build_system_prompt(min_words: int, max_words: int) -> str:
+def build_system_prompt(
+    min_words: int, max_words: int, niche: str = "", audience: str = ""
+) -> str:
+    creator_context = ""
+    if niche or audience:
+        creator_context = (
+            f"\nCreator context: primary niche is {niche or 'general storytelling'}; "
+            f"target audience is {audience or 'a general storytelling audience'}. "
+            "Use this only to choose suitable language, stakes, humor, and pacing.\n"
+        )
     return f"""You write narration scripts for a sleep and storytelling YouTube channel.
 Create one continuous narrative arc with no chapters, chapter headings, numbered sections,
 repeated templates, or other structural labels. Use calm, low-stimulation pacing suitable
@@ -35,6 +48,18 @@ Use original language and follow these writing rules:
   for a natural spoken rhythm.
 - Open with a simple curiosity hook, then introduce a small discovery, choice, surprise,
   funny detail, or emotional change regularly so the journey stays interesting.
+- Establish one clear central character or focal subject, what they want or need, and the
+  main story question early. Do not spend a long opening only describing atmosphere.
+- Build a cause-and-effect chain: each important action, discovery, decision, and consequence
+  must grow naturally from what happened before. Avoid coincidences that solve the problem.
+- Give the middle real progress and change. Add a complication, useful discovery, reversal,
+  relationship shift, or difficult choice instead of repeating similar scenes.
+- Keep names, relationships, knowledge, motivations, locations, props, time, weather, travel,
+  and physical details consistent unless the story clearly changes them.
+- Pay off important clues, promises, objects, rules, and relationships. The climax should
+  result from the central character's accumulated choices, learning, kindness, or courage.
+- Resolve the central story question and show the emotional change before a gentle ending.
+  Do not rush, preach a moral, recap the whole plot, or introduce a new major conflict.
 - Use natural dialogue and gentle humor when they fit. Never force jokes into sad, tense,
   historical, or reflective moments.
 - Infer the likely audience and genre from the topic. A children's or cartoon story may be
@@ -42,9 +67,11 @@ Use original language and follow these writing rules:
 - Show what happens instead of lecturing, explaining a moral, or repeatedly describing the
   atmosphere. Avoid filler, cliches, recaps, and repeated ideas.
 - Keep danger age-appropriate and avoid sudden disturbing detail because this is sleep content.
+- For historical, cultural, scientific, documentary, or folklore topics, do not invent facts
+  and present them as verified. Make original fictionalization clear through the narrative.
 Vary sentence rhythm so the prose does not sound repetitive or like AI filler. Return only
 narration prose, without notes about the request or writing process. Follow the requested word
-range closely and include a gentle, satisfying, complete ending."""
+range closely and include a gentle, satisfying, complete ending.{creator_context}"""
 
 
 def word_count(text: str) -> int:
@@ -66,6 +93,30 @@ def trim_to_word_limit(text: str, min_words: int, max_words: int) -> str:
         return candidate[:sentence_end].strip()
 
     return candidate.rstrip(" ,;:-") + "."
+
+
+def apply_quality_gate(text: str, min_words: int, max_words: int) -> str:
+    """Remove structural AI artefacts and reject incomplete narration safely."""
+    cleaned: list[str] = []
+    previous = ""
+    for paragraph in (item.strip() for item in re.split(r"\n\s*\n", text)):
+        if not paragraph or HEADING_PATTERN.match(paragraph):
+            continue
+        fingerprint = re.sub(r"\W+", " ", paragraph.lower()).strip()
+        if fingerprint == previous:
+            continue
+        cleaned.append(paragraph)
+        previous = fingerprint
+    result = "\n\n".join(cleaned).strip()
+    total = word_count(result)
+    if total < min_words:
+        raise RuntimeError(
+            f"Story quality check found an incomplete narration ({total:,} words)."
+        )
+    result = trim_to_word_limit(result, min_words, max_words)
+    if result and result[-1] not in '.!?\"”’':
+        result = result.rstrip(" ,;:-") + "."
+    return result
 
 
 def safe_topic_slug(topic: str) -> str:
@@ -128,12 +179,14 @@ def generate_script(
     target_words: int,
     max_words: int,
     verbose: bool = True,
+    niche: str = "",
+    audience: str = "",
 ) -> str:
     draft = ""
     history: list[types.Content] = []
 
     config = types.GenerateContentConfig(
-        system_instruction=build_system_prompt(min_words, max_words),
+        system_instruction=build_system_prompt(min_words, max_words, niche, audience),
         max_output_tokens=8_000,
         temperature=0.8,
     )
@@ -183,9 +236,7 @@ def generate_script(
             print(f"  [part {part_num}] +{added_words:,} words -> {current_words:,} total")
 
         if ending_requested and current_words >= min_words:
-            if current_words > max_words:
-                draft = trim_to_word_limit(draft, min_words, max_words)
-            return draft
+            return apply_quality_gate(draft, min_words, max_words)
 
     raise RuntimeError(
         f"The model did not reach {min_words:,} words after {MAX_PARTS} requests "
@@ -207,6 +258,8 @@ def parse_args() -> argparse.Namespace:
         type=float,
         help="Desired narration duration; omit to enter it interactively",
     )
+    parser.add_argument("--niche", default="", help="Creator niche guidance")
+    parser.add_argument("--audience", default="", help="Target audience guidance")
     args = parser.parse_args()
     if args.minutes is not None and args.minutes <= 0:
         parser.error("--minutes must be greater than zero")
@@ -274,6 +327,8 @@ def main() -> None:
         min_words,
         target_words,
         max_words,
+        niche=args.niche,
+        audience=args.audience,
     )
 
     output_dir = SCRIPTS_DIR

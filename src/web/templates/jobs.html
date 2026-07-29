@@ -1,13 +1,11 @@
 {% extends 'base.html' %}
 {% block content %}
 <div class="page-heading">
-  <div><p class="eyebrow">Operations</p><h1>Jobs</h1><p>Track generation, uploaded media, publishing, failures, and completed work.</p></div>
+  <div><p class="eyebrow">{{ 'Administration' if is_admin else 'Your work' }}</p><h1>{{ 'All jobs' if is_admin else 'My videos' }}</h1><p>{{ 'Review work across every customer.' if is_admin else 'See what is being created, what is ready, and what needs attention.' }}</p></div>
 </div>
 <section class="panel">
   <form class="filter-bar" method="get" action="/jobs">
-    <label>Workflow<select name="workflow"><option value="all" {{ 'selected' if workflow == 'all' else '' }}>All workflows</option><option value="storytelling" {{ 'selected' if workflow == 'storytelling' else '' }}>Storytelling</option><option value="social" {{ 'selected' if workflow == 'social' else '' }}>Social and uploads</option></select></label>
-    <label>Status<select name="status"><option value="all">All statuses</option>{% for status in job_statuses %}<option value="{{ status }}" {{ 'selected' if selected_status == status else '' }}>{{ status|replace('_', ' ')|title }}</option>{% endfor %}</select></label>
-    <button class="button secondary" type="submit">Apply filters</button>
+    <label>Video type<select name="workflow"><option value="all" {{ 'selected' if workflow == 'all' else '' }}>All videos</option><option value="storytelling" {{ 'selected' if workflow == 'storytelling' else '' }}>Story videos</option><option value="social" {{ 'selected' if workflow == 'social' else '' }}>Uploads and posts</option></select></label><label>Progress<select name="status"><option value="all">Any progress</option>{% for status in job_statuses %}<option value="{{ status }}" {{ 'selected' if selected_status == status else '' }}>{{ status|friendly_status }}</option>{% endfor %}</select></label><button class="button secondary" type="submit">Show results</button>
   </form>
   {% include '_job_table.html' %}
 </section>

@@ -1,0 +1,8 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="page-heading"><div><p class="eyebrow">Updates</p><h1>Notifications</h1><p>Job and billing updates for your creator account.</p></div></div>
+<section class="panel"><div class="notification-list">
+{% for notice in notifications %}<article><span class="status">{{ notice.kind|title }}</span><div><strong>{{ notice.message }}</strong><small><time data-utc-time="{{ notice.created_at }}">{{ notice.created_at[:16]|replace('T', ' ') }}</time></small></div></article>
+{% else %}<div class="empty-state"><h3>No notifications yet</h3><p>Completed jobs and important billing updates will appear here.</p></div>{% endfor %}
+</div></section>
+{% endblock %}
