@@ -24,6 +24,9 @@ services:
     env_file: .env
     environment:
       DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL in .env}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-https://myautomationstudio.com}
+      R2_PREFIX: ${R2_PREFIX:-sleep-studio}
+      COOKIE_SECURE: ${COOKIE_SECURE:-true}
     depends_on:
       postgres:
         condition: service_healthy

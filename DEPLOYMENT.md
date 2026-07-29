@@ -26,7 +26,7 @@ Create these records:
 Create GitHub environments named `production` and `staging`. Add one environment secret
 named `STUDIO_ENV_FILE` to each. Do not use a GitHub variable for this file.
 
-Production must contain:
+Production routing is supplied by its workflow. Do not add these values to the secret:
 
 ```env
 PUBLIC_BASE_URL=https://myautomationstudio.com
@@ -40,7 +40,7 @@ Keep the existing production `POSTGRES_PASSWORD`, `DATABASE_URL`,
 `ADMIN_SESSION_SECRET`, `OAUTH_TOKEN_ENCRYPTION_KEY`, and R2 credentials unchanged so
 existing accounts, sessions, connected YouTube channels, and media remain readable.
 
-Staging must contain:
+Staging routing is also supplied by its workflow. Do not add these values to the secret:
 
 ```env
 PUBLIC_BASE_URL=https://staging.myautomationstudio.com
