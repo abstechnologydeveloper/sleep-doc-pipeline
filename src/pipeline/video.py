@@ -32,9 +32,12 @@ from project_paths import (
 WORDS_PER_SCENE = 50  # must match generate_images.py
 WORDS_PER_CAPTION = 5
 TRANSITION_SECONDS = 1.0
-VIDEO_WIDTH = 1280
-VIDEO_HEIGHT = 720
+VIDEO_WIDTH = 1920
+VIDEO_HEIGHT = 1080
 VIDEO_FPS = 24
+THUMBNAIL_WIDTH = 3840
+THUMBNAIL_HEIGHT = 2160
+MAX_YOUTUBE_THUMBNAIL_BYTES = 1_950_000
 EFFECT_POINTS = (
     (96, 88, 2.9, 0.2),
     (211, 142, 3.7, 1.1),
@@ -204,7 +207,7 @@ def load_thumbnail_hook(image_dir: Path) -> str:
     try:
         payload = json.loads(plan_path.read_text(encoding="utf-8"))
         hook = str(payload.get("thumbnail_hook", "")).strip()
-        return " ".join(hook.split()[:5])
+        return " ".join(hook.split()[:4])
     except (OSError, json.JSONDecodeError, TypeError):
         return ""
 
@@ -467,9 +470,13 @@ def build_video_filter(
         )
         if effect not in {"", "none", "fog"}:
             color = "white" if effect == "stars" else "0xffd27f"
-            y_offset = 0 if effect == "stars" else 245
+            scale_x = VIDEO_WIDTH / 1280
+            scale_y = VIDEO_HEIGHT / 720
+            y_offset = 0 if effect == "stars" else round(245 * scale_y)
             for point, (x, y, period, phase) in enumerate(EFFECT_POINTS):
-                size = 2 + (point % 2)
+                x = round(x * scale_x)
+                y = round(y * scale_y)
+                size = round((2 + (point % 2)) * scale_y)
                 if effect == "stars":
                     effect_x = str(x)
                     effect_y = str(y)
@@ -478,18 +485,18 @@ def build_video_filter(
                 elif effect == "rain":
                     color = "0xb9d9ed"
                     effect_x = str(x)
-                    effect_y = f"mod({y}+t*115+{phase * 30:.1f},{VIDEO_HEIGHT})"
-                    effect_w = 1
-                    effect_h = 12
+                    effect_y = f"mod({y}+t*{round(115 * scale_y)}+{phase * 45:.1f},{VIDEO_HEIGHT})"
+                    effect_w = 2
+                    effect_h = round(12 * scale_y)
                 elif effect == "snow":
                     color = "white"
-                    effect_x = f"{x}+14*sin(t*0.45+{phase})"
-                    effect_y = f"mod({y}+t*16+{phase * 30:.1f},{VIDEO_HEIGHT})"
+                    effect_x = f"{x}+{round(14 * scale_x)}*sin(t*0.45+{phase})"
+                    effect_y = f"mod({y}+t*{round(16 * scale_y)}+{phase * 45:.1f},{VIDEO_HEIGHT})"
                     effect_w = size + 1
                     effect_h = size + 1
                 else:
-                    effect_x = f"{x}+10*sin(t*0.35+{phase})"
-                    effect_y = f"{y + y_offset}-mod(t*5+{phase * 18:.1f},110)"
+                    effect_x = f"{x}+{round(10 * scale_x)}*sin(t*0.35+{phase})"
+                    effect_y = f"{y + y_offset}-mod(t*{round(5 * scale_y)}+{phase * 27:.1f},{round(110 * scale_y)})"
                     effect_w = size
                     effect_h = size
                 scene_filter += (
@@ -541,10 +548,10 @@ def build_video_filter(
         current_label = "titled"
 
     caption_style = (
-        "FontName=Arial,FontSize=26,PrimaryColour=&H00FFFFFF,"
+        "FontName=Arial,FontSize=38,PrimaryColour=&H00FFFFFF,"
         "OutlineColour=&H00000000,BackColour=&H80000000,"
         "BorderStyle=3,Outline=1,Shadow=0,"
-        "Alignment=2,MarginV=42"
+        "Alignment=2,MarginV=62"
     )
     filters.append(
         f"[{current_label}]subtitles=filename='{caption_filename}':"
@@ -554,7 +561,7 @@ def build_video_filter(
 
 
 def thumbnail_title(title: str, script_stem: str) -> str:
-    """Create a calm, readable three-to-six-word thumbnail headline."""
+    """Create a readable two-to-four-word thumbnail headline."""
     candidate = title.strip()
     if not candidate:
         candidate = re.sub(r"^\d{8}_\d{6}_", "", script_stem).replace("-", " ")
@@ -565,7 +572,7 @@ def thumbnail_title(title: str, script_stem: str) -> str:
         candidate,
         flags=re.IGNORECASE,
     ).strip(" -:|")
-    words = candidate.split()[:6]
+    words = candidate.split()[:4]
     if not words:
         words = ["A", "CALM", "NIGHT", "STORY"]
     split_at = (len(words) + 1) // 2
@@ -598,7 +605,7 @@ PlayResY: {VIDEO_HEIGHT}
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Opening,Arial,34,&H00FFFFFF,&H00FFFFFF,&H00101010,&H50000000,-1,0,0,0,100,100,1,0,1,2,1,7,52,52,54,1
+Style: Opening,Arial,50,&H00FFFFFF,&H00FFFFFF,&H00101010,&H50000000,-1,0,0,0,100,100,1,0,1,3,1,7,78,78,80,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -620,12 +627,12 @@ def write_thumbnail_title_file(title: str, output_dir: Path) -> Path:
     safe_title = safe_ass_text(title)
     ass_content = f"""[Script Info]
 ScriptType: v4.00+
-PlayResX: {VIDEO_WIDTH}
-PlayResY: {VIDEO_HEIGHT}
+PlayResX: {THUMBNAIL_WIDTH}
+PlayResY: {THUMBNAIL_HEIGHT}
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Title,Arial,58,&H00FFFFFF,&H00FFFFFF,&H00000000,&H88000000,-1,0,0,0,100,100,1,0,3,12,0,1,70,70,58,1
+Style: Title,Arial,174,&H00FFFFFF,&H00FFFFFF,&H00000000,&H86000000,-1,0,0,0,100,100,3,0,3,20,0,4,220,190,150,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -662,30 +669,33 @@ def render_thumbnail(
         thumbnail_title(curiosity_hook or title, script_stem), THUMBNAILS_DIR
     )
     thumbnail_filter = (
-        f"scale={VIDEO_WIDTH}:{VIDEO_HEIGHT}:force_original_aspect_ratio=increase,"
-        f"crop={VIDEO_WIDTH}:{VIDEO_HEIGHT},"
-        "eq=saturation=1.32:contrast=1.13:brightness=0.01,"
-        "unsharp=5:5:0.75:5:5:0,vignette=PI/6,"
+        f"scale={THUMBNAIL_WIDTH}:{THUMBNAIL_HEIGHT}:force_original_aspect_ratio=increase,"
+        f"crop={THUMBNAIL_WIDTH}:{THUMBNAIL_HEIGHT},"
+        "eq=saturation=1.30:contrast=1.15:brightness=0.015,"
+        "unsharp=7:7:0.85:5:5:0,vignette=PI/7,"
         f"subtitles=filename='{title_path.name}'"
     )
     try:
-        subprocess.run(
-            [
-                ffmpeg_path,
-                "-y",
-                "-i",
-                str(source_image),
-                "-vf",
-                thumbnail_filter,
-                "-frames:v",
-                "1",
-                "-q:v",
-                "2",
-                str(temporary_output),
-            ],
-            check=True,
-            cwd=THUMBNAILS_DIR,
-        )
+        for jpeg_quality in (5, 8, 11, 14):
+            subprocess.run(
+                [
+                    ffmpeg_path,
+                    "-y",
+                    "-i",
+                    str(source_image),
+                    "-vf",
+                    thumbnail_filter,
+                    "-frames:v",
+                    "1",
+                    "-q:v",
+                    str(jpeg_quality),
+                    str(temporary_output),
+                ],
+                check=True,
+                cwd=THUMBNAILS_DIR,
+            )
+            if temporary_output.stat().st_size <= MAX_YOUTUBE_THUMBNAIL_BYTES:
+                break
         temporary_output.replace(output_path)
         return output_path
     finally:
@@ -802,15 +812,15 @@ def render_video(
                 "-c:v",
                 "libx264",
                 "-preset",
-                "veryfast",
+                "fast",
                 "-profile:v",
                 "main",
                 "-level:v",
-                "3.1",
+                "4.0",
                 "-pix_fmt",
                 "yuv420p",
                 "-crf",
-                "20",
+                "18",
                 "-c:a",
                 "aac",
                 "-b:a",
