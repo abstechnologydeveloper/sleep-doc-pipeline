@@ -1303,10 +1303,13 @@ async def automatic_job(request: Request):
     try:
         verify_csrf(request, str(form.get("csrf", "")))
         topic = str(form.get("topic", "")).strip()
+        search_keyword = str(form.get("search_keyword", "")).strip()
+        if len(search_keyword) > 120:
+            raise ValueError("Search phrase is too long")
         minutes = float(str(form.get("minutes", "1")))
         scheduled_at = normalized_schedule(str(form.get("scheduled_at", "")))
         validate_creator_content(
-            topic, str(form.get("title", "")), str(form.get("description", ""))
+            topic, search_keyword, str(form.get("title", "")), str(form.get("description", ""))
         )
     except ValueError:
         return HTMLResponse("Invalid story request", status_code=400)
@@ -1328,7 +1331,8 @@ async def automatic_job(request: Request):
         topic=topic, minutes=minutes,
         title=str(form.get("title", "")).strip(),
         description=str(form.get("description", "")).strip(),
-        hashtags=str(form.get("hashtags", "")), platforms=selected_platforms(form),
+        hashtags=str(form.get("hashtags", "")), search_keyword=search_keyword,
+        platforms=selected_platforms(form),
         scheduled_at=scheduled_at,
         active_limit=MAX_ACTIVE_CREATOR_JOBS,
     )

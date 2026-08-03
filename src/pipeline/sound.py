@@ -17,6 +17,15 @@ API_URL = "https://api.elevenlabs.io/v1/sound-generation"
 MODEL_ID = "eleven_text_to_sound_v2"
 MANIFEST_FILENAME = "sound_manifest.json"
 MAX_SOUND_CUES = 30
+AMBIENCE_FILENAME = "ambience.mp3"
+AMBIENCE_SECONDS = 12.0
+AMBIENCE_RULES = (
+    (("rain", "storm", "drizzle"), "steady gentle rain outside, seamless calm ambience, no thunder, no music, no voices"),
+    (("train", "railway", "sleeper car"), "soft steady sleeper train rhythm on rails, seamless calm ambience, no horn, no voices, no music"),
+    (("fireplace", "hearth", "wood stove"), "quiet fireplace crackle in a warm room, seamless calm ambience, no sharp pops, no voices, no music"),
+    (("ocean", "seaside", "sea", "coast"), "slow gentle ocean waves at night, seamless calm ambience, no birds, no voices, no music"),
+    (("forest", "woods", "stream", "waterfall"), "soft forest night with light breeze and distant water, seamless calm ambience, no animal calls, no voices, no music"),
+)
 
 
 def select_script(script_argument: str | None) -> Path:
@@ -75,6 +84,31 @@ def normalized_cues(payload: object, scene_ids: list[str]) -> list[dict]:
         )
     maximum = min(MAX_SOUND_CUES, max(1, (len(scene_ids) + 1) // 2))
     return cues[:maximum]
+
+
+def select_ambience(text: str, project_profile: object) -> dict | None:
+    """Choose one unobtrusive loop only for calm, sleep-oriented productions."""
+    profile = json.dumps(project_profile, ensure_ascii=False).lower()
+    if not any(
+        word in profile
+        for word in ("sleep", "bedtime", "cozy", "relaxing", "soothing", "restful")
+    ):
+        return None
+    lowered = text.lower()
+    ranked = [
+        (sum(lowered.count(keyword) for keyword in keywords), prompt)
+        for keywords, prompt in AMBIENCE_RULES
+    ]
+    score, prompt = max(ranked, key=lambda item: item[0])
+    if score == 0:
+        return None
+    return {
+        "filename": AMBIENCE_FILENAME,
+        "prompt": prompt,
+        "duration_seconds": AMBIENCE_SECONDS,
+        "volume": 0.035,
+        "kind": "continuous_ambience",
+    }
 
 
 def generate_sound(api_key: str, cue: dict) -> bytes:
@@ -144,8 +178,11 @@ def main() -> None:
             for index in range(1, len(plan.get("scene_prompts", [])) + 1)
         ]
     cues = normalized_cues(plan.get("sound_cues"), scene_ids)
-    if not cues:
-        print("Sound design skipped: no useful sound moments were selected.")
+    ambience = select_ambience(
+        script_path.read_text(encoding="utf-8"), plan.get("project_profile", {})
+    )
+    if not cues and not ambience:
+        print("Sound design skipped: no useful sound moments or ambience were selected.")
         return
 
     output_dir = SOUNDS_DIR / script_path.stem
@@ -193,8 +230,28 @@ def main() -> None:
 
     completed_cues = [item for _, item in sorted(completed, key=lambda row: row[0])]
 
+    completed_ambience = None
+    if ambience:
+        ambience_path = output_dir / AMBIENCE_FILENAME
+        if ambience_path.is_file() and ambience_path.stat().st_size > 0:
+            print("  Continuous ambience already done, skipping.")
+            completed_ambience = ambience
+        else:
+            print(f"  Generating continuous ambience: {ambience['prompt'][:70]}...")
+            temporary_path = ambience_path.with_suffix(".generating.mp3")
+            try:
+                temporary_path.write_bytes(generate_sound(api_key, ambience))
+                temporary_path.replace(ambience_path)
+                completed_ambience = ambience
+            except (OSError, RuntimeError) as exc:
+                temporary_path.unlink(missing_ok=True)
+                print(f"  Warning: continuous ambience was skipped ({exc})")
+
     (output_dir / MANIFEST_FILENAME).write_text(
-        json.dumps({"cues": completed_cues}, indent=2), encoding="utf-8"
+        json.dumps(
+            {"cues": completed_cues, "ambience": completed_ambience}, indent=2
+        ),
+        encoding="utf-8",
     )
     print(f"Sound effects saved to {output_dir}")
 

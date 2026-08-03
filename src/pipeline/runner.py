@@ -253,6 +253,10 @@ def main() -> None:
             args.title,
             "--content-style",
             args.content_style,
+            "--niche",
+            args.niche,
+            "--audience",
+            args.audience,
             *(["--max-images", str(args.max_images)] if args.max_images else []),
         ],
     )
