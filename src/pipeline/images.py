@@ -331,8 +331,14 @@ setting, camera distance, composition, and lighting without changing locked deta
 Generate native cinematic 16:9 compositions with important subjects in a central safe area,
 no words, letters, logos, watermark, collage, frame, gore, or nudity.
 
-Choose restrained camera movement and transitions. Select sparse sound cues only for visible
-or strongly implied events; use stable scene_id values.
+Choose continuous, restrained camera movement so no image feels frozen. Use slow_push or
+slow_pull for intimate or still moments, pan_left or pan_right for journeys and horizontal
+action, and pan_up or pan_down for tall buildings, trees, mountains, skies, or reveals.
+Match scene changes: use dissolve when the subject or location continues, smooth_left or
+smooth_right when travel or action continues, and fade only for a real change in time or
+place. The outgoing image must keep moving while the incoming image replaces it smoothly.
+Select sparse sound cues only for visible or strongly implied events; use stable scene_id
+values. Never create whooshes, swipes, impacts, or other sounds for visual transitions.
 
 Design a separate high-performing YouTube thumbnail concept. It must make one specific,
 unanswered story question instantly visible while remaining completely honest to the video.
@@ -363,7 +369,8 @@ Return JSON only with:
 - scenes: ordered objects with start_segment, end_segment, beat, action, characters (IDs),
   location (ID or empty), importance (mandatory or continuity), reuse_scene_id (earlier
   scene_### or null), prompt, and direction containing camera (slow_push, slow_pull,
-  pan_left, pan_right), transition (fade, dissolve, smooth_left, smooth_right), and
+  pan_left, pan_right, pan_up, pan_down), transition (fade, dissolve, smooth_left,
+  smooth_right), and
   atmosphere (none, stars, rain, snow, embers, fog, motes)
 - sound_cues: sparse objects with scene_id, position (0 to 1), prompt, duration_seconds
   (0.5 to 4), volume (0.04 to 0.16), and kind
@@ -487,11 +494,11 @@ Return JSON only with:
 - visual_bible: a concise string
 - scene_prompts: an array of exactly {len(scenes)} detailed strings in scene order
 - scene_directions: an array of exactly {len(scenes)} objects, each containing camera
-  (slow_push, slow_pull, pan_left, or pan_right), transition (fade, dissolve, smooth_left,
+  (slow_push, slow_pull, pan_left, pan_right, pan_up, or pan_down), transition (fade, dissolve, smooth_left,
   or smooth_right), and atmosphere (none, stars, rain, snow, embers, fog, or motes)
 - sound_cues: a sparse array of objects containing scene_index (1-based), position (a number
   from 0 to 1 within that scene), prompt (a concise sound-only description), duration_seconds
-  (0.5 to 4.0), volume (0.04 to 0.16), and kind (action, environment, or transition)
+  (0.5 to 4.0), volume (0.04 to 0.16), and kind (action or environment)
 - thumbnail_hook: a 2-to-4-word curiosity headline, with no quotation marks
 - thumbnail_prompt: one detailed string
 """
