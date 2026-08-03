@@ -17,6 +17,7 @@ YOUTUBE_SCOPES = (
     "https://www.googleapis.com/auth/youtube.upload",
     "https://www.googleapis.com/auth/youtube.readonly",
 )
+YOUTUBE_DEVICE_NOTE = "Watch on your phone, tablet, computer, or TV."
 
 
 @dataclass(frozen=True)
@@ -222,10 +223,12 @@ def _upload_youtube(user_id: int, video_path: Path, metadata: dict) -> dict:
     privacy = str(metadata.get("youtube_privacy") or "public").lower()
     if privacy not in {"private", "unlisted", "public"}:
         privacy = "private"
-    description = "\n\n".join(
-        value.strip() for value in (metadata.get("description", ""), metadata.get("hashtags", ""))
-        if value and value.strip()
-    )[:5000]
+    description_parts = [
+        str(value).strip()
+        for value in (metadata.get("description", ""), YOUTUBE_DEVICE_NOTE, metadata.get("hashtags", ""))
+        if value and str(value).strip()
+    ]
+    description = "\n\n".join(dict.fromkeys(description_parts))[:5000]
     payload = json.dumps(
         {
             "snippet": {
