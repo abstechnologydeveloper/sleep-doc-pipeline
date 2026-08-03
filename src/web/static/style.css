@@ -102,6 +102,21 @@ small { display: block; color: var(--muted); line-height: 1.35; }
 .sidebar-bottom-nav .nav-item { padding-inline: 2px; }
 .admin-identity { display: flex; align-items: center; gap: 9px; margin-bottom: 10px; }
 .admin-identity small { font-size: 11px; }
+.account-switcher { position: relative; }
+.account-switcher > summary { display: grid; grid-template-columns: 34px 1fr auto; align-items: center; gap: 9px; padding: 7px 5px; border-radius: 8px; cursor: pointer; list-style: none; }
+.account-switcher > summary::-webkit-details-marker { display: none; }
+.account-switcher > summary:hover, .account-switcher[open] > summary { background: var(--hover); }
+.account-switcher strong, .account-option strong { display: block; overflow: hidden; color: var(--text); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.account-switcher small, .account-option small { display: block; overflow: hidden; color: var(--muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.account-chevron { color: var(--muted); font-size: 12px; }
+.account-switcher[open] .account-chevron { transform: rotate(180deg); }
+.account-menu { position: absolute; z-index: 20; right: 0; bottom: calc(100% + 8px); left: 0; padding: 8px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel); box-shadow: 0 16px 40px #00000038; }
+.account-menu > p { margin: 3px 6px 7px; color: var(--muted); font-size: 10px; font-weight: 750; letter-spacing: .08em; text-transform: uppercase; }
+.account-option { display: grid; grid-template-columns: 30px minmax(0,1fr); align-items: center; gap: 8px; width: 100%; padding: 7px 6px; border: 0; border-radius: 7px; background: transparent; text-align: left; cursor: pointer; }
+.account-option:hover, .account-action:hover { background: var(--hover); color: var(--text); }
+.account-option .avatar { width: 28px; height: 28px; font-size: 11px; }
+.account-action { display: block; width: 100%; margin-top: 2px; padding: 8px 7px; border: 0; border-top: 1px solid var(--border-soft); background: transparent; color: var(--muted); font: inherit; font-size: 12px; text-align: left; cursor: pointer; }
+.danger-link { color: var(--danger); }
 .text-button { padding: 4px 0; border: 0; background: transparent; color: var(--muted); cursor: pointer; }
 .text-button:hover { color: #fff; }
 
