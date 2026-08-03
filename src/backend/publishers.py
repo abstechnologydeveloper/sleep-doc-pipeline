@@ -279,7 +279,28 @@ def _upload_youtube(user_id: int, video_path: Path, metadata: dict) -> dict:
     video_id = str(uploaded.get("id", ""))
     if not video_id:
         raise RuntimeError("YouTube completed without returning a video ID")
-    return {"remote_id": video_id, "remote_url": f"https://youtu.be/{video_id}"}
+    result = {"remote_id": video_id, "remote_url": f"https://youtu.be/{video_id}"}
+    thumbnail_path = metadata.get("thumbnail_path")
+    if isinstance(thumbnail_path, Path) and thumbnail_path.is_file():
+        try:
+            thumbnail_request = request.Request(
+                "https://www.googleapis.com/upload/youtube/v3/thumbnails/set?"
+                + parse.urlencode({"videoId": video_id, "uploadType": "media"}),
+                data=thumbnail_path.read_bytes(),
+                method="POST",
+                headers={
+                    "Authorization": f"Bearer {access_token}",
+                    "Content-Type": "image/jpeg",
+                    "User-Agent": "my-automation-studio/1.0",
+                },
+            )
+            with request.urlopen(thumbnail_request, timeout=120) as response:
+                response.read()
+        except (error.HTTPError, error.URLError, OSError, TimeoutError) as exc:
+            result["error"] = (
+                "The video was published, but YouTube could not attach its custom thumbnail."
+            )
+    return result
 
 
 def publish(platform: str, owner_id: int | None, video_path: Path, metadata: dict) -> dict:

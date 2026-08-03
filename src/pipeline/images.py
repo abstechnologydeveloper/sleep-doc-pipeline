@@ -187,7 +187,7 @@ def fallback_visual_plan(scenes: list[str]) -> dict:
             for _scene in scenes
         ],
         "sound_cues": [],
-        "thumbnail_hook": "WHAT HAPPENS NEXT?",
+        "thumbnail_hook": "LOOK CLOSER",
         "thumbnail_prompt": scene_to_prompt(scenes[0]),
     }
 
@@ -332,9 +332,22 @@ Generate native cinematic 16:9 compositions with important subjects in a central
 no words, letters, logos, watermark, collage, frame, gore, or nudity.
 
 Choose restrained camera movement and transitions. Select sparse sound cues only for visible
-or strongly implied events; use stable scene_id values. Create a separate colorful YouTube
-thumbnail with one readable subject, an honest curiosity gap, strong contrast, focal subject
-on the right, and clean darker space on the left for text.
+or strongly implied events; use stable scene_id values.
+
+Design a separate high-performing YouTube thumbnail concept. It must make one specific,
+unanswered story question instantly visible while remaining completely honest to the video.
+Use one large, emotionally readable person, place, or object on the right third; one unusual
+but truthful visual detail that creates curiosity; strong warm-versus-cool color contrast;
+and a simple background with clean darker space on the left for added text. The subject and
+curiosity detail must still be clear at phone size. Do not create a collage, crowded scene,
+tiny subject, generic landscape, fake danger, misleading reaction, arrow, circle, logo, or
+words inside the generated image. For history, show a recognisable person, object, decision,
+or disputed moment without inventing facts. For sleep stories, show a safe but irresistible
+place, arrival, light, doorway, train, room, or discovery without horror.
+
+Write a thumbnail_hook of 2 to 4 simple words. It must complement rather than repeat the
+video title, expose the curiosity gap without answering it, and avoid generic phrases such as
+WHAT HAPPENS NEXT, YOU WON'T BELIEVE, MUST SEE, or THE TRUTH.
 
 Title: {title or '(derive from the narration)'}
 Numbered narration segments:
@@ -354,7 +367,7 @@ Return JSON only with:
   atmosphere (none, stars, rain, snow, embers, fog, motes)
 - sound_cues: sparse objects with scene_id, position (0 to 1), prompt, duration_seconds
   (0.5 to 4), volume (0.04 to 0.16), and kind
-- thumbnail_hook: 2 to 5 simple curiosity words
+- thumbnail_hook: 2 to 4 simple curiosity words that complement the title
 - thumbnail_prompt: detailed native 16:9 prompt
 """
 
@@ -372,7 +385,7 @@ Return JSON only with:
         scenes = materialize_scenes(raw_plan.get("scenes"), segments)
         distinct_scene_count = cap_distinct_scenes(scenes, max_images)
         hook = " ".join(
-            str(raw_plan.get("thumbnail_hook", "")).strip().strip('"\'').split()[:5]
+            str(raw_plan.get("thumbnail_hook", "")).strip().strip('"\'').split()[:4]
         ).upper()
         plan = {
             "version": PLAN_VERSION,
@@ -382,7 +395,7 @@ Return JSON only with:
             "visual_bible": str(raw_plan.get("visual_bible", "")).strip(),
             "scenes": scenes,
             "sound_cues": raw_plan.get("sound_cues", []),
-            "thumbnail_hook": hook or "WHAT HAPPENS NEXT?",
+            "thumbnail_hook": hook or "LOOK CLOSER",
             "thumbnail_prompt": (
                 f"{str(raw_plan.get('thumbnail_prompt', '')).strip()[:1750]}{STYLE_SUFFIX}"
             ),
@@ -453,7 +466,7 @@ Place the focal subject on the right and leave clean darker space on the left fo
 Do not put words, letters, logos, watermarks, frames, split screens, collages, gore, nudity, or
 copyrighted characters in any prompt.
 
-Also write a thumbnail hook of 2 to 5 simple words. It should create a truthful curiosity gap
+Also write a thumbnail hook of 2 to 4 simple words. It should create a truthful curiosity gap
 that the story answers, preferably as a short question when natural. Do not merely repeat the
 video title. Avoid vague hooks, fake danger, spoilers, difficult words, and exaggerated clickbait.
 
@@ -479,7 +492,7 @@ Return JSON only with:
 - sound_cues: a sparse array of objects containing scene_index (1-based), position (a number
   from 0 to 1 within that scene), prompt (a concise sound-only description), duration_seconds
   (0.5 to 4.0), volume (0.04 to 0.16), and kind (action, environment, or transition)
-- thumbnail_hook: a 2-to-5-word curiosity headline, with no quotation marks
+- thumbnail_hook: a 2-to-4-word curiosity headline, with no quotation marks
 - thumbnail_prompt: one detailed string
 """
 
@@ -504,7 +517,7 @@ Return JSON only with:
             f"{plan['thumbnail_prompt'][:1750]}{STYLE_SUFFIX}"
         )
         hook = str(plan.get("thumbnail_hook", "")).strip().strip('"\'')
-        plan["thumbnail_hook"] = " ".join(hook.split()[:5]).upper()
+        plan["thumbnail_hook"] = " ".join(hook.split()[:4]).upper()
         plan_path.write_text(json.dumps(plan, indent=2), encoding="utf-8")
         print(f"Saved cinematic scene plan: {plan_path.name}")
         return plan
@@ -534,8 +547,8 @@ def request_image(
         parameters["steps"] = 4
     else:
         parameters.update(
-            width=1536,
-            height=864,
+            width=1920,
+            height=1080,
             num_steps=24,
             guidance=5,
         )

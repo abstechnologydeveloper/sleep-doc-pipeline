@@ -402,11 +402,26 @@ def process_job(job) -> None:
                 return
 
             database.update_job(job["id"], "publishing", video_path=remote_video)
+            thumbnail_path = None
+            if generated_video:
+                candidate = THUMBNAILS_DIR / f"{generated_video.stem}.jpg"
+                if candidate.is_file():
+                    thumbnail_path = candidate
+            if thumbnail_path is None:
+                thumbnail_reference = storage.thumbnail_reference(remote_video)
+                if thumbnail_reference:
+                    try:
+                        thumbnail_path = stack.enter_context(
+                            storage.local_copy(thumbnail_reference, ".jpg")
+                        )
+                    except RuntimeError:
+                        thumbnail_path = None
             metadata = dict(
                 title=job["title"],
                 description=job["description"],
                 hashtags=job["hashtags"],
                 youtube_privacy=job.get("youtube_privacy") or "public",
+                thumbnail_path=thumbnail_path,
             )
             waiting = False
             for platform in platforms:
