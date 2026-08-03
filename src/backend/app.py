@@ -928,8 +928,8 @@ def update_settings(
         return HTMLResponse("Choose a supported voice direction", status_code=400)
     if not creator_niche.strip() or len(creator_niche.strip()) > 120:
         return HTMLResponse("Enter a story type using 120 characters or fewer", status_code=400)
-    if not content_style.strip() or len(content_style.strip()) > 120:
-        return HTMLResponse("Enter a picture style using 120 characters or fewer", status_code=400)
+    if not content_style.strip() or len(content_style.strip()) > 300:
+        return HTMLResponse("Enter a picture style using 300 characters or fewer", status_code=400)
     if not target_audience.strip() or len(target_audience.strip()) > 160:
         return HTMLResponse("Describe your viewers using 160 characters or fewer", status_code=400)
     if not creator_goal.strip() or len(creator_goal.strip()) > 300:
