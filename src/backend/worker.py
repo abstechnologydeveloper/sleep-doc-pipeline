@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import signal
 import shutil
 import subprocess
@@ -34,6 +35,25 @@ HEARTBEAT_SECONDS = 15
 
 class JobCancelled(Exception):
     pass
+
+
+def research_sources_for_video(video_path: Path) -> str:
+    """Build a short public source note from a factual script's grounding report."""
+    report_path = SCRIPTS_DIR / f"{video_path.stem}.research.md"
+    if not report_path.is_file():
+        return ""
+    try:
+        report = report_path.read_text(encoding="utf-8")
+    except OSError:
+        return ""
+    urls = []
+    for url in re.findall(r"https?://[^\s)>\]]+", report):
+        clean = url.rstrip(".,;:'\"")
+        if clean not in urls:
+            urls.append(clean)
+    if not urls:
+        return ""
+    return "Sources used for research:\n" + "\n".join(f"- {url}" for url in urls[:8])
 
 
 def notify_creator(user_id: int | None, message: str) -> None:
@@ -205,6 +225,8 @@ def cleanup_cancelled_pipeline(script_path: Path) -> None:
     """Remove resumable working files after the creator deletes the job."""
     stem = script_path.stem
     script_path.unlink(missing_ok=True)
+    script_path.with_suffix(".research.md").unlink(missing_ok=True)
+    script_path.with_suffix(".fact-check.md").unlink(missing_ok=True)
     for path in (
         AUDIO_DIR / f"{stem}.wav",
         AUDIO_DIR / f"{stem}.timings.json",
@@ -279,6 +301,7 @@ def process_job(job) -> None:
                         audience=job.get("target_audience") or "",
                         content_style=job.get("content_style") or "",
                         creator_goal=job.get("creator_goal") or "",
+                        search_keyword=job.get("search_keyword") or "",
                         recent_ideas=database.recent_story_ideas(
                             int(job["owner_id"]), int(job["id"])
                         ),
@@ -296,6 +319,16 @@ def process_job(job) -> None:
                         print(f"Topic: {job['topic']}", file=log_file, flush=True)
                         video_path = run_automatic(job, log_file)
                         generated_video = video_path
+                        source_note = research_sources_for_video(video_path)
+                        if source_note:
+                            description = str(job.get("description") or "").strip()
+                            if "Sources used for research:" not in description:
+                                job["description"] = (
+                                    f"{description}\n\n{source_note}".strip()
+                                )[:5000]
+                                database.update_job(
+                                    job["id"], "processing", description=job["description"]
+                                )
                 else:
                     source_reference = str(job["source_path"])
                     video_path = stack.enter_context(

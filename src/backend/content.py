@@ -22,6 +22,7 @@ def generate_post_metadata(
     audience: str = "",
     content_style: str = "",
     creator_goal: str = "",
+    search_keyword: str = "",
     recent_ideas: list[str] | None = None,
 ) -> dict[str, str]:
     """Fill missing concept and post fields while preserving supplied values."""
@@ -62,7 +63,11 @@ Creator profile guidance:
 - target audience: {audience or 'a general storytelling audience'}
 - preferred picture style: {content_style or 'choose what fits the story'}
 - creator's goal: {creator_goal or 'make an enjoyable original video'}
+- vidIQ-validated target search phrase: {search_keyword or '(none supplied)'}
 Use this guidance when generating missing fields, but do not mention the profile itself.
+When a target search phrase is supplied, keep the concept relevant to its real search intent,
+use the phrase once naturally in the title when it reads well, and once in the first sentence
+of the description. Never repeat it unnaturally or change factual claims to force it in.
 
 This creator's recent ideas are listed below. Do not repeat their central character, character
 name, setting, object, mystery, title pattern, opening event, or ending. If the list is empty,

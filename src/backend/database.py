@@ -97,6 +97,7 @@ def initialize() -> None:
                 title TEXT NOT NULL,
                 description TEXT NOT NULL DEFAULT '',
                 hashtags TEXT NOT NULL DEFAULT '',
+                search_keyword TEXT NOT NULL DEFAULT '',
                 platforms TEXT NOT NULL,
                 scheduled_at TEXT,
                 source_path TEXT,
@@ -241,6 +242,7 @@ def initialize() -> None:
             ALTER TABLE jobs ADD COLUMN IF NOT EXISTS target_audience TEXT NOT NULL DEFAULT '';
             ALTER TABLE jobs ADD COLUMN IF NOT EXISTS content_style TEXT NOT NULL DEFAULT 'cinematic';
             ALTER TABLE jobs ADD COLUMN IF NOT EXISTS creator_goal TEXT NOT NULL DEFAULT '';
+            ALTER TABLE jobs ADD COLUMN IF NOT EXISTS search_keyword TEXT NOT NULL DEFAULT '';
             ALTER TABLE jobs ADD COLUMN IF NOT EXISTS youtube_privacy TEXT NOT NULL DEFAULT 'private';
             ALTER TABLE jobs ALTER COLUMN youtube_privacy SET DEFAULT 'public';
             ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS paystack_customer_code TEXT NOT NULL DEFAULT '';
@@ -608,6 +610,7 @@ def create_story_job(
     title: str,
     description: str,
     hashtags: str,
+    search_keyword: str,
     platforms: list[str],
     scheduled_at: str | None,
     active_limit: int = 1,
@@ -656,10 +659,11 @@ def create_story_job(
         cursor = db.execute(
             """INSERT INTO jobs
             (owner_id, owner_job_number, kind, status, topic, minutes, title, description, hashtags,
+             search_keyword,
              platforms, scheduled_at, source_path, narration_voice, voice_direction, max_images,
              creator_niche, target_audience, content_style, creator_goal,
              created_at, updated_at)
-            VALUES (?, ?, 'automatic', 'queued', ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, 'automatic', 'queued', ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             RETURNING id""",
             (
                 owner_id,
@@ -669,6 +673,7 @@ def create_story_job(
                 title,
                 description,
                 hashtags,
+                search_keyword,
                 json.dumps(platforms),
                 scheduled_at,
                 user["narration_voice"],

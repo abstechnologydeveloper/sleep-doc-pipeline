@@ -256,6 +256,24 @@ def load_sound_cues(
     return cues
 
 
+def load_continuous_ambience(script_stem: str) -> dict | None:
+    """Load one generated ambience bed that ffmpeg will loop under narration."""
+    sound_dir = SOUNDS_DIR / script_stem
+    manifest_path = sound_dir / "sound_manifest.json"
+    if not manifest_path.is_file():
+        return None
+    try:
+        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+        ambience = payload.get("ambience")
+        if not isinstance(ambience, dict):
+            return None
+        path = sound_dir / Path(str(ambience["filename"])).name
+        volume = min(0.06, max(0.01, float(ambience.get("volume", 0.035))))
+    except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError):
+        return None
+    return {"path": path, "volume": volume} if path.is_file() else None
+
+
 def timed_scene_durations(
     scenes: list[dict], text: str, duration: float, timing_path: Path
 ) -> list[float]:
@@ -685,6 +703,7 @@ def render_video(
     title: str = "",
     scene_directions: list[dict] | None = None,
     sound_cues: list[dict] | None = None,
+    ambience: dict | None = None,
 ) -> None:
     """Render crossfaded images, captions, narration, and sparse effects."""
     ffmpeg_path = shutil.which("ffmpeg")
@@ -726,6 +745,11 @@ def render_video(
 
         audio_input_index = len(image_paths)
         command.extend(["-i", str(audio_path)])
+        ambience_input_index = None
+        if ambience:
+            ambience_input_index = audio_input_index + 1
+            command.extend(["-stream_loop", "-1", "-i", str(ambience["path"])])
+        cue_input_start = audio_input_index + 1 + (1 if ambience else 0)
         for cue in sound_cues or []:
             command.extend(["-i", str(cue["path"])])
 
@@ -734,8 +758,19 @@ def render_video(
             "loudnorm=I=-16:TP=-1.5:LRA=7[narration]"
         ]
         sound_labels = []
+        if ambience_input_index is not None:
+            total_duration = sum(scene_durations)
+            fade_out_start = max(0.0, total_duration - 1.5)
+            audio_filters.append(
+                f"[{ambience_input_index}:a]atrim=duration={total_duration:.3f},"
+                "asetpts=N/SR/TB,"
+                f"volume={ambience['volume']:.3f},"
+                "afade=t=in:st=0:d=1.0,"
+                f"afade=t=out:st={fade_out_start:.3f}:d=1.5[ambience]"
+            )
+            sound_labels.append("[ambience]")
         for index, cue in enumerate(sound_cues or []):
-            input_index = audio_input_index + index + 1
+            input_index = cue_input_start + index
             delay_ms = max(0, round(cue["start"] * 1_000))
             fade_out_start = max(0.0, cue["duration"] - 0.25)
             label = f"effect{index}"
@@ -867,11 +902,14 @@ def main() -> None:
         audio_path.with_suffix(".timings.json"),
     )
     sound_cues = load_sound_cues(script_path.stem, scenes, scene_durations)
+    ambience = load_continuous_ambience(script_path.stem)
 
     print(f"Audio duration: {total_duration / 60:.1f} minutes")
     print(f"Building {len(image_paths)} timed image clips...")
     if sound_cues:
         print(f"Mixing {len(sound_cues)} quiet story sound effects...")
+    if ambience:
+        print("Mixing continuous low-volume ambience...")
 
     output_dir = VIDEOS_DIR
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -888,6 +926,7 @@ def main() -> None:
         args.title,
         scene_directions,
         sound_cues,
+        ambience,
     )
     thumbnail_path = render_thumbnail(
         shutil.which("ffmpeg") or "ffmpeg",

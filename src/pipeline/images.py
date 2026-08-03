@@ -268,6 +268,8 @@ def create_dynamic_visual_plan(
     plan_path: Path,
     max_images: int,
     preferred_style: str = "cinematic",
+    niche: str = "",
+    audience: str = "",
 ) -> dict:
     """Plan visuals around narrative events rather than a words-per-image ratio."""
     if plan_path.is_file():
@@ -310,17 +312,22 @@ closest suitable earlier visual with a different camera movement when a new paid
 exceed the limit. Never report the budget as insufficient. A scene may reuse an earlier image
 by setting reuse_scene_id to that earlier ID.
 
+The creator's niche is {niche or 'general storytelling'}.
+The target audience is {audience or 'infer it from the narration'}.
 The creator's preferred visual direction is {preferred_style}. Honor it when it suits the
-story and audience, while keeping age and safety appropriate. Infer the audience and choose
+story and audience, while keeping age and safety appropriate. Use this context and choose
 a fitting coherent visual medium: realistic cinema for adult
 realistic stories, age-appropriate 2D or 3D animation for children, historical realism,
 fantasy illustration, gentle gothic suspense, nature documentary, or another suitable style.
 Never imitate a named artist, studio, franchise, or copyrighted character.
 
 Create continuity registries for every recurring character, location, and important prop.
-Lock faces, age, body shape, hair, clothing, colors, architecture, geography, weather,
-lighting direction, and palette. Each prompt must repeat the relevant locked details and
-describe visible action, expression, setting, camera distance, composition, and lighting.
+Give every recurring character one immutable canonical_description containing their face,
+age, body shape, skin tone, hair, clothing, and fixed colors. Copy that exact description
+word-for-word into every scene prompt where the character appears; never shorten, paraphrase,
+or replace it. Lock architecture, geography, weather, lighting direction, and palette in the
+same way for recurring locations. Each prompt must describe visible action, expression,
+setting, camera distance, composition, and lighting without changing locked details.
 Generate native cinematic 16:9 compositions with important subjects in a central safe area,
 no words, letters, logos, watermark, collage, frame, gore, or nudity.
 
@@ -337,7 +344,8 @@ Return JSON only with:
 - budget_sufficient: boolean
 - required_scene_count: integer
 - project_profile: audience, genre, visual_medium, tone, palette, lighting
-- continuity: characters, locations, props arrays of detailed objects with stable IDs
+- continuity: characters, locations, props arrays of detailed objects with stable IDs;
+  every recurring character must include an immutable canonical_description
 - visual_bible: concise string
 - scenes: ordered objects with start_segment, end_segment, beat, action, characters (IDs),
   location (ID or empty), importance (mandatory or continuity), reuse_scene_id (earlier
@@ -515,7 +523,7 @@ Return JSON only with:
 
 
 def request_image(
-    account_id: str, api_token: str, prompt: str, model: str
+    account_id: str, api_token: str, prompt: str, model: str, seed: int | None = None
 ) -> tuple[bytes, str]:
     api_url = (
         "https://api.cloudflare.com/client/v4/accounts/"
@@ -531,6 +539,8 @@ def request_image(
             num_steps=24,
             guidance=5,
         )
+        if seed is not None:
+            parameters["seed"] = seed
     body = json.dumps(parameters).encode("utf-8")
     api_request = request.Request(
         api_url,
@@ -569,7 +579,7 @@ def request_image(
 
 
 def generate_image(
-    account_id: str, api_token: str, prompt: str, model: str
+    account_id: str, api_token: str, prompt: str, model: str, seed: int | None = None
 ) -> tuple[bytes, str]:
     last_error = None
     active_prompt = prompt
@@ -577,7 +587,7 @@ def generate_image(
 
     for attempt in range(1, MAX_RETRIES + 1):
         try:
-            return request_image(account_id, api_token, active_prompt, model)
+            return request_image(account_id, api_token, active_prompt, model, seed)
         except error.HTTPError as exc:
             details = exc.read().decode("utf-8", errors="replace").strip()
             if len(details) > 500:
@@ -668,6 +678,8 @@ def main() -> None:
         default="cinematic",
         help="Creator's preferred visual direction",
     )
+    parser.add_argument("--niche", default="", help="Creator's saved channel niche")
+    parser.add_argument("--audience", default="", help="Creator's saved target audience")
     args = parser.parse_args()
 
     script_path = select_script(args.script_path)
@@ -695,6 +707,9 @@ def main() -> None:
     text = script_path.read_text(encoding="utf-8")
     if not text.strip():
         raise SystemExit("The selected script is empty.")
+    story_seed = int(
+        hashlib.sha256(f"{args.title}\n{text}".encode("utf-8")).hexdigest()[:8], 16
+    )
     try:
         max_story_images = args.max_images or int(
             os.getenv("MAX_STORY_IMAGES", str(DEFAULT_MAX_STORY_IMAGES))
@@ -720,6 +735,8 @@ def main() -> None:
         plan_path,
         max_story_images,
         args.content_style,
+        args.niche,
+        args.audience,
     )
 
     if visual_plan.get("version") == PLAN_VERSION:
@@ -768,7 +785,7 @@ def main() -> None:
         prompt = scene["prompt"]
         print(f"  Generating scene {index}/{len(scene_entries)}: {prompt[:70]}...")
         image_data, suffix = generate_image(
-            account_id, api_token, prompt, image_model
+            account_id, api_token, prompt, image_model, story_seed
         )
         image_path = image_dir / f"{image_stem}{suffix}"
         temporary_path = image_dir / f"{image_stem}.generating{suffix}"
@@ -825,6 +842,7 @@ def main() -> None:
             api_token,
             visual_plan["thumbnail_prompt"],
             image_model,
+            story_seed,
         )
         thumbnail_path = image_dir / f"{THUMBNAIL_STEM}{thumbnail_suffix}"
         temporary_path = image_dir / f"{THUMBNAIL_STEM}.generating{thumbnail_suffix}"

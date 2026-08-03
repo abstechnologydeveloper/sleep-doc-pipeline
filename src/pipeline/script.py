@@ -15,6 +15,7 @@ from project_paths import PROJECT_ROOT, SCRIPTS_DIR
 
 MODEL = "gemini-2.5-flash"
 MAX_PARTS = 20
+MAX_FACT_REVISIONS = 1
 WORDS_PER_CHUNK = 2_200
 WORDS_PER_MINUTE = 150
 MINIMUM_WORD_RATIO = 0.9
@@ -23,6 +24,135 @@ HEADING_PATTERN = re.compile(
     r"^(?:chapter|part|section)\s+(?:\d+|[ivxlcdm]+)\b|^(?:introduction|conclusion)\s*$",
     flags=re.IGNORECASE,
 )
+FACTUAL_NICHE_PATTERN = re.compile(
+    r"\b(?:history|historical|documentary|war|military|science|scientific|biography|true story)\b",
+    flags=re.IGNORECASE,
+)
+
+
+def needs_grounded_research(niche: str, topic: str) -> bool:
+    """Return whether a topic needs evidence before it becomes narration."""
+    return bool(FACTUAL_NICHE_PATTERN.search(f"{niche} {topic}"))
+
+
+def grounding_sources(response) -> list[str]:
+    """Extract unique Google Search grounding links without relying on one SDK shape."""
+    sources: list[str] = []
+    seen_urls: set[str] = set()
+    candidates = getattr(response, "candidates", None) or []
+    if not candidates:
+        return sources
+    metadata = getattr(candidates[0], "grounding_metadata", None)
+    for chunk in getattr(metadata, "grounding_chunks", None) or []:
+        web = getattr(chunk, "web", None)
+        url = str(getattr(web, "uri", "") or "").strip()
+        title = str(getattr(web, "title", "") or "").strip()
+        if url and url not in seen_urls:
+            seen_urls.add(url)
+            sources.append(f"- {title + ': ' if title else ''}{url}")
+    return sources
+
+
+def grounded_text(client: genai.Client, prompt: str) -> str:
+    """Run a low-temperature Google-grounded request and retain its source links."""
+    response = client.models.generate_content(
+        model=MODEL,
+        contents=prompt,
+        config=types.GenerateContentConfig(
+            tools=[types.Tool(google_search=types.GoogleSearch())],
+            temperature=0.2,
+        ),
+    )
+    text = str(response.text or "").strip()
+    if not text:
+        raise RuntimeError("Grounded research returned no usable text.")
+    sources = grounding_sources(response)
+    if sources:
+        text = f"{text}\n\nGROUNDING SOURCES\n" + "\n".join(sources)
+    return text
+
+
+def research_factual_topic(client: genai.Client, topic: str, niche: str) -> str:
+    """Create a source-backed fact brief before drafting a factual video."""
+    return grounded_text(
+        client,
+        f"""Research this planned factual YouTube video using reliable primary, museum,
+government, university, or established historical sources wherever possible.
+
+Topic: {topic}
+Channel niche: {niche or 'factual documentary'}
+
+Return a concise production brief with these headings:
+VERIFIED FACTS, CHRONOLOGY, DISPUTED OR UNCERTAIN CLAIMS, CLAIMS TO AVOID, PRONUNCIATIONS,
+and SOURCE NOTES. Include exact names, dates, places, context, and uncertainty needed to write
+the video accurately. Do not invent dialogue, private thoughts, numbers, motives, or events.
+Clearly label legends and disputed claims. This is research, not the narration script.""",
+    )
+
+
+def review_factual_script(
+    client: genai.Client, topic: str, script: str, research_brief: str
+) -> str:
+    """Ground-check every material factual claim before downstream paid work starts."""
+    return grounded_text(
+        client,
+        f"""Fact-check the narration below using Google Search and the supplied research brief.
+Check names, dates, places, sequence, quantities, quotations, causation, disputed claims, and
+whether legend is presented as fact. Also flag invented dialogue or private thoughts.
+
+The first line must be exactly VERDICT: PASS when no material correction is needed, or
+VERDICT: FAIL when any material claim needs correction. After that, list each issue with a
+specific correction. Do not fail only for writing style.
+
+TOPIC
+{topic}
+
+RESEARCH BRIEF
+{research_brief}
+
+NARRATION
+{script}""",
+    )
+
+
+def revise_factual_script(
+    client: genai.Client,
+    script: str,
+    research_brief: str,
+    review: str,
+    min_words: int,
+    max_words: int,
+    niche: str,
+    audience: str,
+    creator_goal: str,
+) -> str:
+    """Correct a failed factual draft once while preserving the requested duration."""
+    response = client.models.generate_content(
+        model=MODEL,
+        contents=f"""Correct the narration using the fact-check report and research brief.
+Remove any claim that cannot be supported. Label legends and uncertainty clearly. Do not add
+new facts, quotations, dialogue, or private thoughts. Keep one continuous narration between
+{min_words:,} and {max_words:,} words and return narration prose only.
+
+RESEARCH BRIEF
+{research_brief}
+
+FACT-CHECK REPORT
+{review}
+
+CURRENT NARRATION
+{script}""",
+        config=types.GenerateContentConfig(
+            system_instruction=build_system_prompt(
+                min_words, max_words, niche, audience, creator_goal
+            ),
+            max_output_tokens=8_000,
+            temperature=0.25,
+        ),
+    )
+    if not response.text:
+        raise RuntimeError("The factual correction pass returned no narration.")
+    return apply_quality_gate(response.text, min_words, max_words)
 
 
 def build_system_prompt(
@@ -193,6 +323,7 @@ def generate_script(
     niche: str = "",
     audience: str = "",
     creator_goal: str = "",
+    research_brief: str = "",
 ) -> str:
     draft = ""
     history: list[types.Content] = []
@@ -217,7 +348,13 @@ def generate_script(
         )
 
         if not draft:
-            prompt = f'The topic is: "{topic}".\n\n{instruction}'
+            evidence = (
+                "\n\nUse only the verified facts in this grounded research brief. "
+                "Clearly label uncertainty and legends. Do not invent missing details.\n\n"
+                f"GROUNDED RESEARCH BRIEF\n{research_brief}"
+                if research_brief else ""
+            )
+            prompt = f'The topic is: "{topic}".\n\n{instruction}{evidence}'
         else:
             prompt = instruction
 
@@ -331,6 +468,12 @@ def main() -> None:
 
     client = genai.Client(api_key=api_key)
 
+    research_brief = ""
+    factual_mode = needs_grounded_research(args.niche, topic)
+    if factual_mode:
+        print("Researching factual claims with Google Search grounding...")
+        research_brief = research_factual_topic(client, topic, args.niche)
+
     print(f"Generating script for: {topic}")
     print(
         f"Target duration: {minutes:g} minute(s) "
@@ -345,7 +488,32 @@ def main() -> None:
         niche=args.niche,
         audience=args.audience,
         creator_goal=args.goal,
+        research_brief=research_brief,
     )
+
+    fact_check = ""
+    if factual_mode:
+        print("Fact-checking the completed narration...")
+        fact_check = review_factual_script(client, topic, script, research_brief)
+        for revision_number in range(MAX_FACT_REVISIONS):
+            if fact_check.lstrip().upper().startswith("VERDICT: PASS"):
+                break
+            print(
+                f"Correcting factual issues automatically "
+                f"({revision_number + 1}/{MAX_FACT_REVISIONS})..."
+            )
+            script = revise_factual_script(
+                client,
+                script,
+                research_brief,
+                fact_check,
+                min_words,
+                max_words,
+                args.niche,
+                args.audience,
+                args.goal,
+            )
+            fact_check = review_factual_script(client, topic, script, research_brief)
 
     output_dir = SCRIPTS_DIR
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -353,8 +521,18 @@ def main() -> None:
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     output_path = output_dir / f"{timestamp}_{safe_topic_slug(topic)}.txt"
     output_path.write_text(script + "\n", encoding="utf-8")
+    if factual_mode:
+        output_path.with_suffix(".research.md").write_text(
+            f"# Grounded research\n\n{research_brief}\n", encoding="utf-8"
+        )
+        output_path.with_suffix(".fact-check.md").write_text(
+            f"# Automated fact-check\n\n{fact_check}\n", encoding="utf-8"
+        )
 
     print(f"\nSaved script to {output_path}")
+    if factual_mode:
+        print(f"Research: {output_path.with_suffix('.research.md')}")
+        print(f"Fact-check: {output_path.with_suffix('.fact-check.md')}")
     print(f"Word count: {word_count(script):,}")
 
 
