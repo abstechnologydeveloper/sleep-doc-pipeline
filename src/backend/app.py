@@ -49,6 +49,7 @@ from .content_policy import validate_creator_content
 
 WEB_DIR = Path(__file__).resolve().parents[1] / "web"
 TEMPLATES = Jinja2Templates(directory=WEB_DIR / "templates")
+MAX_SESSION_ACCOUNTS = 20
 FRIENDLY_STATUSES = {
     "queued": "Waiting to start",
     "processing": "Creating your video",
@@ -138,15 +139,60 @@ async def search_engine_headers(request: Request, call_next):
     return response
 
 
+def remembered_account_ids(request: Request) -> list[int]:
+    """Return unique account IDs from this signed browser session."""
+    values = request.session.get("account_ids", [])
+    if not isinstance(values, list):
+        values = []
+    account_ids = []
+    for value in values:
+        if isinstance(value, int) and value > 0 and value not in account_ids:
+            account_ids.append(value)
+    current_id = request.session.get("user_id")
+    if isinstance(current_id, int) and current_id > 0 and current_id not in account_ids:
+        account_ids.append(current_id)
+    return account_ids[-MAX_SESSION_ACCOUNTS:]
+
+
+def activate_account(request: Request, user_id: int) -> None:
+    """Remember and activate one account without retaining unsafe form tokens."""
+    account_ids = [value for value in remembered_account_ids(request) if value != user_id]
+    account_ids.append(user_id)
+    request.session["account_ids"] = account_ids[-MAX_SESSION_ACCOUNTS:]
+    request.session["user_id"] = user_id
+    request.session["csrf"] = new_token()
+
+
+def available_session_accounts(request: Request) -> list:
+    """Remove unavailable accounts and return accounts safe to switch into."""
+    accounts = []
+    valid_ids = []
+    for user_id in remembered_account_ids(request):
+        user = database.get_user(user_id)
+        if user and user["status"] == "active":
+            accounts.append(user)
+            valid_ids.append(user_id)
+    request.session["account_ids"] = valid_ids[-MAX_SESSION_ACCOUNTS:]
+    return accounts[-MAX_SESSION_ACCOUNTS:]
+
+
 def current_user(request: Request):
     user_id = request.session.get("user_id")
-    if not isinstance(user_id, int):
-        return None
-    user = database.get_user(user_id)
-    if not user or user["status"] != "active":
-        request.session.clear()
-        return None
-    return user
+    if isinstance(user_id, int):
+        user = database.get_user(user_id)
+        if user and user["status"] == "active":
+            account_ids = remembered_account_ids(request)
+            if request.session.get("account_ids") != account_ids:
+                request.session["account_ids"] = account_ids
+            return user
+    accounts = available_session_accounts(request)
+    if accounts:
+        fallback = accounts[-1]
+        request.session.pop("user_id", None)
+        activate_account(request, int(fallback["id"]))
+        return fallback
+    request.session.clear()
+    return None
 
 
 def authenticated(request: Request) -> bool:
@@ -224,6 +270,7 @@ def page_context(request: Request, section: str, **values) -> dict:
         "csrf": csrf_token(request),
         "current_user": user,
         "is_admin": is_admin(user),
+        "session_accounts": available_session_accounts(request),
         **values,
     }
 
@@ -534,7 +581,8 @@ async def job_updates(websocket: WebSocket):
 
 @app.get("/login", response_class=HTMLResponse)
 def login_page(request: Request):
-    if current_user(request):
+    adding_account = request.query_params.get("add") == "1"
+    if current_user(request) and not adding_account:
         return RedirectResponse("/app", status_code=303)
     return TEMPLATES.TemplateResponse(
         request,
@@ -544,17 +592,21 @@ def login_page(request: Request):
             "google_enabled": google_enabled(),
             "sent": request.query_params.get("sent") == "1",
             "error": request.query_params.get("error", ""),
+            "adding_account": adding_account,
         },
     )
 
 
 @app.post("/auth/email")
-def email_login(request: Request, email: str = Form(), csrf: str = Form()):
+def email_login(
+    request: Request, email: str = Form(), csrf: str = Form(), add_account: str = Form("")
+):
+    add_query = "&add=1" if add_account == "1" else ""
     try:
         verify_csrf(request, csrf)
         clean_email = normalize_email(email)
     except ValueError as exc:
-        return RedirectResponse(f"/login?error={str(exc)}", status_code=303)
+        return RedirectResponse(f"/login?error={str(exc)}{add_query}", status_code=303)
     token = new_token()
     hashed_token = token_hash(token)
     created = database.create_magic_link(
@@ -568,9 +620,10 @@ def email_login(request: Request, email: str = Form(), csrf: str = Form()):
         except RuntimeError:
             database.discard_magic_link(hashed_token)
             return RedirectResponse(
-                "/login?error=Sign-in+email+is+temporarily+unavailable", status_code=303
+                "/login?error=Sign-in+email+is+temporarily+unavailable" + add_query,
+                status_code=303,
             )
-    return RedirectResponse("/login?sent=1", status_code=303)
+    return RedirectResponse("/login?sent=1" + add_query, status_code=303)
 
 
 @app.get("/auth/email/verify")
@@ -586,9 +639,7 @@ def verify_email_login(request: Request, background_tasks: BackgroundTasks, toke
     )
     if user["status"] != "active":
         return RedirectResponse("/login?error=Account+suspended", status_code=303)
-    request.session.clear()
-    request.session["user_id"] = int(user["id"])
-    csrf_token(request)
+    activate_account(request, int(user["id"]))
     new_creator = created and user["role"] == "creator"
     if new_creator:
         background_tasks.add_task(send_welcome_email, str(user["email"]))
@@ -626,17 +677,47 @@ def google_callback(
         return RedirectResponse("/login?error=Google+sign-in+failed", status_code=303)
     if user["status"] != "active":
         return RedirectResponse("/login?error=Account+suspended", status_code=303)
-    request.session.clear()
-    request.session["user_id"] = int(user["id"])
-    csrf_token(request)
+    activate_account(request, int(user["id"]))
     new_creator = created and user["role"] == "creator"
     if new_creator:
         background_tasks.add_task(send_welcome_email, str(user["email"]))
     return RedirectResponse("/settings?welcome=1" if new_creator else "/app", status_code=303)
 
 
+@app.post("/accounts/switch")
+def switch_account(request: Request, user_id: int = Form(), csrf: str = Form()):
+    verify_csrf(request, csrf)
+    if user_id not in remembered_account_ids(request):
+        return HTMLResponse("This account is not signed in on this browser.", status_code=403)
+    user = database.get_user(user_id)
+    if not user or user["status"] != "active":
+        request.session["account_ids"] = [
+            value for value in remembered_account_ids(request) if value != user_id
+        ]
+        return HTMLResponse("This account is not available.", status_code=403)
+    activate_account(request, user_id)
+    return RedirectResponse("/app", status_code=303)
+
+
 @app.post("/logout")
 def logout(request: Request, csrf: str = Form()):
+    verify_csrf(request, csrf)
+    current_id = request.session.get("user_id")
+    remaining_ids = [
+        value for value in remembered_account_ids(request) if value != current_id
+    ]
+    request.session["account_ids"] = remaining_ids
+    request.session.pop("user_id", None)
+    accounts = available_session_accounts(request)
+    if accounts:
+        activate_account(request, int(accounts[-1]["id"]))
+        return RedirectResponse("/app", status_code=303)
+    request.session.clear()
+    return RedirectResponse("/", status_code=303)
+
+
+@app.post("/logout/all")
+def logout_all(request: Request, csrf: str = Form()):
     verify_csrf(request, csrf)
     request.session.clear()
     return RedirectResponse("/", status_code=303)
@@ -644,6 +725,7 @@ def logout(request: Request, csrf: str = Form()):
 
 @app.get("/", response_class=HTMLResponse)
 def landing(request: Request):
+    user = current_user(request)
     base_url = public_base_url() or str(request.base_url).rstrip("/")
     testimonials = [dict(row) for row in database.list_public_testimonials(limit=3)]
     for testimonial in testimonials:
@@ -657,7 +739,9 @@ def landing(request: Request):
         request,
         "landing.html",
         {
-            "current_user": current_user(request),
+            "current_user": user,
+            "csrf": csrf_token(request) if user else "",
+            "session_accounts": available_session_accounts(request) if user else [],
             "plans": PLANS.values(),
             "testimonials": testimonials,
             "landing_url": f"{base_url}/",
@@ -679,6 +763,7 @@ def pricing_page(request: Request):
         "pricing.html",
         {
             "current_user": user,
+            "session_accounts": available_session_accounts(request) if user else [],
             "plans": PLANS.values(),
             "csrf": csrf_token(request) if user else "",
             "billing_configured": paystack.configured(),
@@ -1864,15 +1949,24 @@ def delete_account(request: Request, confirmation: str = Form(), csrf: str = For
     if confirmation.strip().lower() != str(user["email"]).lower():
         return HTMLResponse("Enter your account email exactly to confirm deletion.", status_code=400)
     references = database.user_media_references(int(user["id"]))
+    remaining_ids = [
+        value for value in remembered_account_ids(request) if value != int(user["id"])
+    ]
     database.record_audit(int(user["id"]), "account.deleted", "user", str(user["id"]))
     database.delete_creator(int(user["id"]))
-    request.session.clear()
+    request.session["account_ids"] = remaining_ids
+    request.session.pop("user_id", None)
     for reference in {value for value in references if storage.is_remote(value)}:
         try:
             storage.delete_object(reference)
             storage.delete_object(storage.thumbnail_reference(reference))
         except RuntimeError:
             pass
+    accounts = available_session_accounts(request)
+    if accounts:
+        activate_account(request, int(accounts[-1]["id"]))
+        return RedirectResponse("/app?account=deleted", status_code=303)
+    request.session.clear()
     return RedirectResponse("/?account=deleted", status_code=303)
 
 
@@ -1895,8 +1989,11 @@ def legal_page(request: Request, page: str):
     if page in {"support", "copyright"} and os.getenv("SUPPORT_EMAIL", "").strip():
         page_content += f" Contact: {os.getenv('SUPPORT_EMAIL', '').strip()}."
     base_url = public_base_url() or str(request.base_url).rstrip("/")
+    user = current_user(request)
     return TEMPLATES.TemplateResponse(
-        request, "legal.html", {"current_user": current_user(request),
+        request, "legal.html", {"current_user": user,
+                                "csrf": csrf_token(request) if user else "",
+                                "session_accounts": available_session_accounts(request) if user else [],
                                 "page_title": content[0], "page_content": page_content,
                                 "canonical_url": f"{base_url}/legal/{page}"},
     )

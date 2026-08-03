@@ -12,7 +12,7 @@
   <link rel="apple-touch-icon" href="/static/logo.png?v=1">
   <link rel="manifest" href="/static/site.webmanifest">
   <script src="/static/theme.js?v=20260729-17"></script>
-  <link rel="stylesheet" href="/static/style.css?v=20260729-20">
+  <link rel="stylesheet" href="/static/style.css?v=20260803-21">
   <script defer src="/static/jobs.js?v=20260729-16"></script>
 </head>
 <body>
@@ -45,11 +45,16 @@
       </nav>
       <div class="sidebar-footer">
         {% if not is_admin %}<nav class="sidebar-bottom-nav" aria-label="Subscription"><a class="nav-item {{ 'active' if active_section == 'subscription' else '' }}" href="/subscription">{{ nav_icon('subscription') }}<span>Subscription</span></a></nav>{% endif %}
-        <div class="admin-identity"><span class="avatar">{{ (current_user.name or current_user.email)[0]|upper }}</span><span><strong>{{ current_user.name or current_user.email }}</strong><small>{% if is_admin %}Administrator{% else %}{{ current_user.plan|title }} creator{% endif %}</small></span></div>
-        <form method="post" action="/logout">
-          <input type="hidden" name="csrf" value="{{ csrf }}">
-          <button class="text-button" type="submit">Sign out</button>
-        </form>
+        <details class="account-switcher">
+          <summary><span class="avatar">{{ (current_user.name or current_user.email)[0]|upper }}</span><span><strong>{{ current_user.name or current_user.email }}</strong><small>{% if is_admin %}Administrator{% else %}{{ current_user.plan|title }} creator{% endif %}</small></span><span class="account-chevron">⌃</span></summary>
+          <div class="account-menu">
+            <p>Switch account</p>
+            {% for account in session_accounts %}{% if account.id != current_user.id %}<form method="post" action="/accounts/switch"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="user_id" value="{{ account.id }}"><button class="account-option" type="submit"><span class="avatar">{{ (account.name or account.email)[0]|upper }}</span><span><strong>{{ account.name or account.email }}</strong><small>{{ account.email }}</small></span></button></form>{% endif %}{% endfor %}
+            <a class="account-action" href="/login?add=1">＋ Add another account</a>
+            <form method="post" action="/logout"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="account-action" type="submit">Sign out this account</button></form>
+            {% if session_accounts|length > 1 %}<form method="post" action="/logout/all"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="account-action danger-link" type="submit">Sign out all accounts</button></form>{% endif %}
+          </div>
+        </details>
       </div>
     </aside>
     <button class="sidebar-overlay" data-sidebar-close aria-label="Close navigation"></button>

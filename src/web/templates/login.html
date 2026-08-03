@@ -2,16 +2,17 @@
 {% block content %}
 <section class="login-panel">
   <div class="login-brand"><img class="brand-logo brand-logo-login" src="/static/logo.png?v=1" alt="My Automation Studio"></div>
-  <div><p class="eyebrow">Creator access</p><h1>Create without passwords</h1><p>Use a secure email link or your Google account.</p></div>
+  <div><p class="eyebrow">Creator access</p><h1>{{ 'Add another account' if adding_account else 'Create without passwords' }}</h1><p>{{ 'Sign in to another account. You can switch accounts from the sidebar.' if adding_account else 'Use a secure email link or your Google account.' }}</p></div>
   {% if error %}<div class="alert error">{{ error }}</div>{% endif %}
   {% if sent %}<div class="alert success">If that email can receive messages, a sign-in link is on its way.</div>{% endif %}
   {% if google_enabled %}<a class="button google-button" href="/auth/google">Continue with Google</a><div class="auth-divider"><span>or</span></div>{% endif %}
   <form method="post" action="/auth/email" class="studio-form">
     <input type="hidden" name="csrf" value="{{ csrf }}">
+    {% if adding_account %}<input type="hidden" name="add_account" value="1">{% endif %}
     <label>Email address<input type="email" name="email" autocomplete="email" required autofocus placeholder="you@example.com"></label>
     <button class="button primary" type="submit">Email me a sign-in link</button>
   </form>
   <p class="auth-note">New here? Your free creator account is made automatically after verification.</p>
-  <a class="text-button" href="/">Back to home</a>
+  <a class="text-button" href="{{ '/app' if adding_account else '/' }}">{{ 'Back to workspace' if adding_account else 'Back to home' }}</a>
 </section>
 {% endblock %}
