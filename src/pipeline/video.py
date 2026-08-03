@@ -31,7 +31,7 @@ from project_paths import (
 
 WORDS_PER_SCENE = 50  # must match generate_images.py
 WORDS_PER_CAPTION = 5
-TRANSITION_SECONDS = 1.0
+TRANSITION_SECONDS = 1.5
 VIDEO_WIDTH = 1920
 VIDEO_HEIGHT = 1080
 VIDEO_FPS = 24
@@ -427,10 +427,16 @@ def build_video_filter(
             pan_x = f"(iw-iw/zoom)*on/{frame_count}"
         else:
             pan_x = "iw/2-(iw/zoom/2)"
+        if camera == "pan_up":
+            pan_y = f"(ih-ih/zoom)*(1-on/{frame_count})"
+        elif camera == "pan_down":
+            pan_y = f"(ih-ih/zoom)*on/{frame_count}"
+        else:
+            pan_y = "ih/2-(ih/zoom/2)"
         zoom = (
-            "if(eq(on,0),1.06,max(zoom-0.00015,1.0))"
+            "if(eq(on,0),1.22,max(zoom-0.00065,1.0))"
             if camera == "slow_pull"
-            else "min(zoom+0.00015,1.06)"
+            else "min(zoom+0.00065,1.22)"
         )
 
         directed_effect = direction.get("atmosphere", "auto")
@@ -463,7 +469,7 @@ def build_video_filter(
             f"scale={VIDEO_WIDTH}:{VIDEO_HEIGHT}:force_original_aspect_ratio=increase,"
             f"crop={VIDEO_WIDTH}:{VIDEO_HEIGHT},"
             f"zoompan=z='{zoom}':x='{pan_x}':"
-            f"y='ih/2-(ih/zoom/2)':d=1:s={VIDEO_WIDTH}x{VIDEO_HEIGHT}:fps={VIDEO_FPS},"
+            f"y='{pan_y}':d=1:s={VIDEO_WIDTH}x{VIDEO_HEIGHT}:fps={VIDEO_FPS},"
             f"{grade},vignette=PI/5,setsar=1,format=yuv420p,"
             f"fps={VIDEO_FPS},settb=1/{VIDEO_FPS},"
             f"setpts=N/({VIDEO_FPS}*TB)"

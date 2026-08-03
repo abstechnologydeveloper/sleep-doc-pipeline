@@ -67,9 +67,10 @@ def normalized_cues(payload: object, scene_ids: list[str]) -> list[dict]:
             position = min(1.0, max(0.0, float(cue.get("position", 0.5))))
             duration = min(4.0, max(0.5, float(cue.get("duration_seconds", 2.0))))
             volume = min(0.16, max(0.04, float(cue.get("volume", 0.10))))
+            kind = str(cue.get("kind", "action"))[:30].lower()
         except (KeyError, IndexError, TypeError, ValueError):
             continue
-        if not 1 <= scene_index <= len(scene_ids) or not prompt:
+        if not 1 <= scene_index <= len(scene_ids) or not prompt or kind == "transition":
             continue
         cues.append(
             {
@@ -79,7 +80,7 @@ def normalized_cues(payload: object, scene_ids: list[str]) -> list[dict]:
                 "prompt": prompt[:500],
                 "duration_seconds": duration,
                 "volume": volume,
-                "kind": str(cue.get("kind", "action"))[:30],
+                "kind": kind,
             }
         )
     maximum = min(MAX_SOUND_CUES, max(1, (len(scene_ids) + 1) // 2))
