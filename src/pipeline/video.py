@@ -554,10 +554,10 @@ def build_video_filter(
         current_label = "titled"
 
     caption_style = (
-        "FontName=Arial,FontSize=38,PrimaryColour=&H00FFFFFF,"
-        "OutlineColour=&H00000000,BackColour=&H80000000,"
-        "BorderStyle=3,Outline=1,Shadow=0,"
-        "Alignment=2,MarginV=62"
+        "FontName=Arial,FontSize=27,PrimaryColour=&H00FFFFFF,"
+        "OutlineColour=&H00000000,BackColour=&H00000000,"
+        "BorderStyle=1,Outline=3,Shadow=1,"
+        "Alignment=2,MarginV=28"
     )
     filters.append(
         f"[{current_label}]subtitles=filename='{caption_filename}':"
