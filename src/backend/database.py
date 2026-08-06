@@ -726,6 +726,21 @@ def recent_story_ideas(user_id: int, exclude_job_id: int, limit: int = 12) -> li
     return ideas
 
 
+def recent_story_script_paths(
+    user_id: int, exclude_job_id: int, limit: int = 10
+) -> list[str]:
+    """Return recent saved scripts used for deterministic repetition checks."""
+    with connect() as db:
+        rows = db.execute(
+            """SELECT script_path FROM jobs
+            WHERE owner_id=? AND kind='automatic' AND id!=?
+            AND script_path IS NOT NULL AND script_path!=''
+            ORDER BY id DESC LIMIT ?""",
+            (user_id, exclude_job_id, limit),
+        ).fetchall()
+    return [str(row["script_path"]) for row in rows if row["script_path"]]
+
+
 def create_uploaded_media(
     *, owner_id: int, title: str, description: str, hashtags: str, source_path: str
 ) -> int:

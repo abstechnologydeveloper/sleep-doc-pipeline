@@ -108,7 +108,7 @@ def resumable_script(job) -> Path | None:
     )
 
 
-def run_automatic(job, log_file) -> Path:
+def run_automatic(job, log_file, recent_script_paths: list[str] | None = None) -> Path:
     existing_videos = set(VIDEOS_DIR.glob("*.mp4"))
     existing_scripts = set(SCRIPTS_DIR.glob("*.txt"))
     script_path = resumable_script(job)
@@ -140,6 +140,8 @@ def run_automatic(job, log_file) -> Path:
         "--goal", job.get("creator_goal") or "",
         "--content-style", job.get("content_style") or "cinematic",
     ])
+    for recent_script_path in recent_script_paths or []:
+        command.extend(["--recent-script", recent_script_path])
     process = subprocess.Popen(
         command,
         cwd=BASE_DIR, stdout=log_file, stderr=subprocess.STDOUT, start_new_session=True,
@@ -292,6 +294,12 @@ def process_job(job) -> None:
             with log_path.open("a", encoding="utf-8") as log_file:
                 if job["kind"] == "automatic":
                     print("Preparing topic and post metadata...", file=log_file, flush=True)
+                    recent_ideas = database.recent_story_ideas(
+                        int(job["owner_id"]), int(job["id"])
+                    )
+                    recent_script_paths = database.recent_story_script_paths(
+                        int(job["owner_id"]), int(job["id"])
+                    )
                     metadata = generate_post_metadata(
                         topic=job["topic"] or "",
                         title=job["title"] or "",
@@ -302,9 +310,7 @@ def process_job(job) -> None:
                         content_style=job.get("content_style") or "",
                         creator_goal=job.get("creator_goal") or "",
                         search_keyword=job.get("search_keyword") or "",
-                        recent_ideas=database.recent_story_ideas(
-                            int(job["owner_id"]), int(job["id"])
-                        ),
+                        recent_ideas=recent_ideas,
                     )
                     if database.cancellation_requested(job["id"]):
                         raise JobCancelled
@@ -317,7 +323,9 @@ def process_job(job) -> None:
                         )
                     else:
                         print(f"Topic: {job['topic']}", file=log_file, flush=True)
-                        video_path = run_automatic(job, log_file)
+                        video_path = run_automatic(
+                            job, log_file, recent_script_paths
+                        )
                         generated_video = video_path
                         source_note = research_sources_for_video(video_path)
                         if source_note:
