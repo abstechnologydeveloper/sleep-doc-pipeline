@@ -175,11 +175,18 @@ mystery or horror, clear and engaging for history or science, and warm when the 
 for it. Do not force every story into a bedtime mood. The finished script must be {min_words:,} to
 {max_words:,} words. Do not copy, quote, or closely paraphrase any real source material.
 Use original language and follow these writing rules:
-- Write in plain, everyday English that is easy to understand when heard once.
-- Prefer concrete words and actions. Avoid academic words, formal phrasing, purple prose,
-  long explanations, and abstract descriptions.
-- Keep most sentences between 6 and 14 words, with occasional shorter or longer sentences
-  for a natural spoken rhythm.
+- Use very simple spoken English. Write so a ten-year-old can understand it after hearing it
+  once, but do not make adult stories childish.
+- Use common, short words. Put only one fact, action, or idea in each sentence.
+- Keep most sentences between 5 and 11 words. Avoid sentences longer than 16 words unless a
+  full name, date, or necessary historical term makes this impossible.
+- Explain an uncommon word or historical term immediately with simple words.
+- Prefer direct verbs such as walked, saw, opened, found, asked, built, fought, or left.
+- Do not use semicolons, long clauses, academic language, formal speech, poetic metaphors, or
+  decorative description. Avoid AI-sounding words such as nestled, tranquil, ethereal,
+  tapestry, symphony, profound, enigmatic, testament, and emanating unless truly necessary.
+- Use only a few useful sensory details. Do not describe the same light, weather, silence,
+  feeling, room, or landscape again in different words.
 - Open with a simple curiosity hook, then introduce a small discovery, choice, surprise,
   funny detail, or emotional change regularly so the journey stays interesting.
 - Establish one clear central character or focal subject, what they want or need, and the
@@ -197,6 +204,9 @@ Use original language and follow these writing rules:
 - Make the character's occupation, age, personality, goal, flaw, relationships, and choices
   specific to this premise. Do not recycle the same lonely traveler, child, librarian, baker,
   lighthouse keeper, or mysterious stranger structure when the topic does not require it.
+- Give this video a distinct story shape. Vary the opening event, main problem, setting,
+  character age, occupation, relationship, key object, turning point, and ending. Never reuse
+  the same sequence of arrival, mysterious guide, glowing clue, hidden room, and peaceful rest.
 - Pay off important clues, promises, objects, rules, and relationships. The climax should
   result from the central character's accumulated choices, learning, kindness, or courage.
 - Resolve the central story question and show the emotional change before a gentle ending.

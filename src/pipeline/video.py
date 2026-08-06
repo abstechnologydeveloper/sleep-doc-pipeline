@@ -31,7 +31,7 @@ from project_paths import (
 
 WORDS_PER_SCENE = 50  # must match generate_images.py
 WORDS_PER_CAPTION = 5
-TRANSITION_SECONDS = 1.5
+TRANSITION_SECONDS = 2.0
 VIDEO_WIDTH = 1920
 VIDEO_HEIGHT = 1080
 VIDEO_FPS = 24
@@ -182,7 +182,7 @@ def load_scene_directions(image_dir: Path, scene_count: int) -> list[dict]:
         return default
     try:
         payload = json.loads(plan_path.read_text(encoding="utf-8"))
-        if payload.get("version") == 2:
+        if payload.get("version") in {2, 3}:
             scenes = payload.get("scenes")
             if isinstance(scenes, list) and len(scenes) == scene_count:
                 return [
@@ -433,10 +433,11 @@ def build_video_filter(
             pan_y = f"(ih-ih/zoom)*on/{frame_count}"
         else:
             pan_y = "ih/2-(ih/zoom/2)"
+        motion_frames = max(1, frame_count - 1)
         zoom = (
-            "if(eq(on,0),1.22,max(zoom-0.00065,1.0))"
+            f"1.22-0.22*on/{motion_frames}"
             if camera == "slow_pull"
-            else "min(zoom+0.00065,1.22)"
+            else f"1.0+0.22*on/{motion_frames}"
         )
 
         directed_effect = direction.get("atmosphere", "auto")
@@ -533,15 +534,32 @@ def build_video_filter(
                 f"[{current_label}][scene{index}]"
                 f"xfade=transition={transition_name}:duration={transition:.3f}:"
                 f"offset={offset:.6f}"
-                f",fps={VIDEO_FPS},settb=1/{VIDEO_FPS}"
+                f",fps={VIDEO_FPS},settb=1/{VIDEO_FPS},"
+                f"setpts=N/({VIDEO_FPS}*TB)"
                 f"[{output_label}]"
             )
             current_label = output_label
             current_duration += input_durations[index] - transition
     elif len(scene_durations) > 1:
         current_label = "joined"
+        fallback_fade = min(0.75, min(scene_durations) / 3)
+        fallback_labels = []
+        for index, duration in enumerate(scene_durations):
+            output_label = f"softcut{index}"
+            fade_filters = []
+            if index > 0:
+                fade_filters.append(f"fade=t=in:st=0:d={fallback_fade:.3f}")
+            if index < len(scene_durations) - 1:
+                fade_start = max(0, duration - fallback_fade)
+                fade_filters.append(
+                    f"fade=t=out:st={fade_start:.3f}:d={fallback_fade:.3f}"
+                )
+            filters.append(
+                f"[scene{index}]{','.join(fade_filters)}[{output_label}]"
+            )
+            fallback_labels.append(f"[{output_label}]")
         filters.append(
-            "".join(f"[scene{index}]" for index in range(len(scene_durations)))
+            "".join(fallback_labels)
             + f"concat=n={len(scene_durations)}:v=1:a=0[{current_label}]"
         )
     else:

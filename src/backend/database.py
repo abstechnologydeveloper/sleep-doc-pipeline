@@ -704,7 +704,7 @@ def create_story_job(
         return job_id, None
 
 
-def recent_story_ideas(user_id: int, exclude_job_id: int, limit: int = 6) -> list[str]:
+def recent_story_ideas(user_id: int, exclude_job_id: int, limit: int = 12) -> list[str]:
     """Return only this creator's recent concepts to reduce accidental repetition."""
     with connect() as db:
         rows = db.execute(
