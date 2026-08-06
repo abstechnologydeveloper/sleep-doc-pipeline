@@ -108,7 +108,7 @@ def load_story_scenes(image_dir: Path, text: str) -> list[dict]:
         try:
             payload = json.loads(plan_path.read_text(encoding="utf-8"))
             scenes = payload.get("scenes")
-            if payload.get("version") == 2 and isinstance(scenes, list) and scenes:
+            if payload.get("version") in {2, 3} and isinstance(scenes, list) and scenes:
                 expected_start = 0
                 normalized = []
                 for index, scene in enumerate(scenes, start=1):
@@ -126,7 +126,7 @@ def load_story_scenes(image_dir: Path, text: str) -> list[dict]:
                     raise ValueError("dynamic scenes do not cover the full script")
                 return normalized
         except (KeyError, TypeError, ValueError, OSError, json.JSONDecodeError):
-            if payload.get("version") == 2:
+            if payload.get("version") in {2, 3}:
                 raise SystemExit(
                     f"Dynamic scene plan is invalid: {plan_path}. "
                     "Regenerate the scene plan before assembling the video."
