@@ -2,9 +2,12 @@
 """Generate a duration-controlled sleep narration script using Gemini."""
 
 import argparse
+import hashlib
 import os
 import re
+from collections import Counter
 from datetime import datetime
+from pathlib import Path
 
 from dotenv import load_dotenv
 from google import genai
@@ -28,6 +31,43 @@ FACTUAL_NICHE_PATTERN = re.compile(
     r"\b(?:history|historical|documentary|war|military|science|scientific|biography|true story)\b",
     flags=re.IGNORECASE,
 )
+NON_NAME_WORDS = {
+    "After", "Again", "Before", "But", "Finally", "For", "From", "He", "Her", "His",
+    "However", "I", "If", "In", "It", "Later", "Meanwhile", "Now", "She", "So", "Soon",
+    "That", "The", "Then", "They", "This", "Though", "When", "While", "With", "You",
+}
+
+
+def story_sentence_hashes(text: str) -> set[str]:
+    """Hash substantial normalized sentences for exact passage-reuse detection."""
+    hashes = set()
+    for sentence in re.split(r"(?<=[.!?])(?:[\"'”’]*)\s+", text):
+        normalized = " ".join(WORD_PATTERN.findall(sentence.lower()))
+        if len(normalized.split()) >= 8:
+            hashes.add(hashlib.sha256(normalized.encode("utf-8")).hexdigest())
+    return hashes
+
+
+def repeated_story_passages(script: str, recent_scripts: list[str]) -> tuple[int, float]:
+    candidate_hashes = story_sentence_hashes(script)
+    if not candidate_hashes:
+        return 0, 0.0
+    previous_hashes = set().union(
+        *(story_sentence_hashes(recent) for recent in recent_scripts)
+    ) if recent_scripts else set()
+    repeated = len(candidate_hashes & previous_hashes)
+    return repeated, repeated / len(candidate_hashes)
+
+
+def recent_character_names(recent_scripts: list[str]) -> list[str]:
+    """Find recurring capitalized names so the next script can avoid them."""
+    counts: Counter[str] = Counter()
+    for script in recent_scripts:
+        for name in re.findall(r"\b[A-Z][a-z]{2,}\b", script):
+            if name not in NON_NAME_WORDS:
+                counts[name] += 1
+    names = {name for name, count in counts.items() if count >= 2}
+    return sorted(names, key=lambda name: (-counts[name], name))[:40]
 
 
 def needs_grounded_research(niche: str, topic: str) -> bool:
@@ -157,15 +197,24 @@ CURRENT NARRATION
 
 def build_system_prompt(
     min_words: int, max_words: int, niche: str = "", audience: str = "",
-    creator_goal: str = "",
+    creator_goal: str = "", content_style: str = "",
+    avoid_character_names: list[str] | None = None,
 ) -> str:
     creator_context = ""
-    if niche or audience or creator_goal:
+    if niche or audience or creator_goal or content_style:
         creator_context = (
             f"\nCreator context: primary niche is {niche or 'general storytelling'}; "
             f"target audience is {audience or 'a general storytelling audience'}. "
             f"Their goal is {creator_goal or 'make an enjoyable original video'}. "
-            "Use this to choose suitable language, stakes, humor, pacing, and emotional payoff.\n"
+            f"Preferred picture direction is {content_style or 'choose what fits the story'}. "
+            "Use this to choose suitable characters, language, stakes, humor, pacing, and emotional payoff.\n"
+        )
+    avoided_name_rule = ""
+    if avoid_character_names:
+        avoided_name_rule = (
+            "- Do not reuse these character names from this creator's recent stories: "
+            f"{', '.join(avoid_character_names)}. Invent a different name that fits this exact "
+            "character, culture, species, place, and time. A required real historical name is allowed.\n"
         )
     return f"""You write narration scripts for a storytelling video channel.
 Create one continuous narrative arc with no chapters, chapter headings, numbered sections,
@@ -198,9 +247,11 @@ Use original language and follow these writing rules:
 - Keep names, relationships, knowledge, motivations, locations, props, time, weather, travel,
   and physical details consistent unless the story clearly changes them.
 - When the topic does not provide a character name, choose a fresh name that fits the setting,
-  culture, time period, and audience. Never default to Ella, Luna, Lily, Maya, Leo, Oliver,
-  Finn, or Pip unless the topic provides that name. Avoid stock AI motifs such as glowing
-  forests, whispering lights, fallen stars, magical clocks, and forgotten towns unless asked.
+  culture, species, time period, and audience. Avoid stock AI motifs such as glowing forests,
+  whispering lights, fallen stars, magical clocks, and forgotten towns unless asked.
+{avoided_name_rule}- When the topic or picture direction calls for animation, freely use animals, birds, fish,
+  weather, objects, or imaginary beings as main characters. They may live, work, travel, and
+  solve problems like people while keeping traits and abilities that fit what they are.
 - Make the character's occupation, age, personality, goal, flaw, relationships, and choices
   specific to this premise. Do not recycle the same lonely traveler, child, librarian, baker,
   lighthouse keeper, or mysterious stranger structure when the topic does not require it.
@@ -333,14 +384,17 @@ def generate_script(
     niche: str = "",
     audience: str = "",
     creator_goal: str = "",
+    content_style: str = "",
     research_brief: str = "",
+    avoid_character_names: list[str] | None = None,
 ) -> str:
     draft = ""
     history: list[types.Content] = []
 
     config = types.GenerateContentConfig(
         system_instruction=build_system_prompt(
-            min_words, max_words, niche, audience, creator_goal
+            min_words, max_words, niche, audience, creator_goal, content_style,
+            avoid_character_names
         ),
         max_output_tokens=8_000,
         temperature=0.8,
@@ -422,6 +476,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--niche", default="", help="Creator niche guidance")
     parser.add_argument("--audience", default="", help="Target audience guidance")
     parser.add_argument("--goal", default="", help="Creator outcome and publishing goal")
+    parser.add_argument("--content-style", default="", help="Preferred picture direction")
+    parser.add_argument(
+        "--recent-script",
+        action="append",
+        type=Path,
+        default=[],
+        help="A recent script used to prevent repeated names and passages",
+    )
     args = parser.parse_args()
     if args.minutes is not None and args.minutes <= 0:
         parser.error("--minutes must be greater than zero")
@@ -478,6 +540,21 @@ def main() -> None:
 
     client = genai.Client(api_key=api_key)
 
+    recent_scripts = []
+    scripts_root = SCRIPTS_DIR.resolve()
+    for recent_path in args.recent_script[:10]:
+        resolved_path = recent_path.resolve()
+        if (
+            resolved_path.suffix.lower() == ".txt"
+            and scripts_root in resolved_path.parents
+            and resolved_path.is_file()
+        ):
+            try:
+                recent_scripts.append(resolved_path.read_text(encoding="utf-8"))
+            except OSError:
+                continue
+    avoided_names = recent_character_names(recent_scripts)
+
     research_brief = ""
     factual_mode = needs_grounded_research(args.niche, topic)
     if factual_mode:
@@ -489,17 +566,34 @@ def main() -> None:
         f"Target duration: {minutes:g} minute(s) "
         f"({min_words:,}-{max_words:,} words)"
     )
-    script = generate_script(
-        client,
-        topic,
-        min_words,
-        target_words,
-        max_words,
-        niche=args.niche,
-        audience=args.audience,
-        creator_goal=args.goal,
-        research_brief=research_brief,
-    )
+    script = ""
+    for generation_attempt in range(2):
+        script = generate_script(
+            client,
+            topic,
+            min_words,
+            target_words,
+            max_words,
+            niche=args.niche,
+            audience=args.audience,
+            creator_goal=args.goal,
+            content_style=args.content_style,
+            research_brief=research_brief,
+            avoid_character_names=avoided_names,
+        )
+        repeated_count, repeated_ratio = repeated_story_passages(
+            script, recent_scripts
+        )
+        if repeated_count < 3 or repeated_ratio < 0.04:
+            break
+        if generation_attempt == 0:
+            print(
+                "The draft repeated recent story passages; generating a fresh version..."
+            )
+    else:
+        raise RuntimeError(
+            "The script repeated too much wording from the creator's recent stories."
+        )
 
     fact_check = ""
     if factual_mode:

@@ -72,9 +72,9 @@ use the phrase once naturally in the title when it reads well, and once in the f
 of the description. Never repeat it unnaturally or change factual claims to force it in.
 
 This creator's recent ideas are listed below. Do not repeat their central character, character
-name, setting, object, mystery, title pattern, opening event, or ending. If the list is empty,
-still avoid stock AI defaults such as Ella, Luna, Lily, Maya, Leo, Oliver, Finn, or Pip, and
-avoid defaulting to whispering lights, glowing forests, forgotten towns, magical clocks, or
+name, setting, object, mystery, title pattern, opening event, or ending. Invent names that fit
+the exact character, culture, species, place, and time instead of relying on a familiar default.
+Avoid defaulting to whispering lights, glowing forests, forgotten towns, magical clocks, or
 fallen stars unless the creator explicitly asks for them.
 The new concept must differ from recent ideas in at least five ways: character age or role,
 setting, time or weather, main goal, important object, story problem, turning point, ending,

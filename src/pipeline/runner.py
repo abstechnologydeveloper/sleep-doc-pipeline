@@ -71,6 +71,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--goal", default="", help="Creator outcome and publishing goal")
     parser.add_argument("--content-style", default="cinematic", help="Preferred visual style")
     parser.add_argument(
+        "--recent-script",
+        action="append",
+        type=Path,
+        default=[],
+        help="A recent script used to prevent repeated names and passages",
+    )
+    parser.add_argument(
         "--max-images", type=int, default=None,
         help="Maximum distinct paid scene images for this job",
     )
@@ -212,6 +219,11 @@ def main() -> None:
         topic = prompt_for_topic(args.topic)
         minutes = prompt_for_minutes(args.minutes)
         previous_scripts = snapshot_scripts()
+        recent_script_args = [
+            argument
+            for path in args.recent_script[:10]
+            for argument in ("--recent-script", str(path))
+        ]
         run_step(
             "1/5 Generating narration script",
             [
@@ -225,6 +237,9 @@ def main() -> None:
                 args.audience,
                 "--goal",
                 args.goal,
+                "--content-style",
+                args.content_style,
+                *recent_script_args,
                 "--",
                 topic,
             ],
