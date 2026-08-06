@@ -51,6 +51,8 @@ the audience is adult, or based closely on an existing copyrighted story.
 The central problem, title promise, thumbnail idea, and eventual resolution must describe the
 same story. Prefer a premise with a natural cause-and-effect journey, a meaningful choice, and
 room to pay off the opening question instead of a mood-only concept.
+Use very simple English. Prefer common words and short sentences. Avoid formal, poetic, or
+academic wording. The idea must be clear when heard once.
 
 Existing values must be preserved when present:
 - topic: {supplied['topic'] or '(generate this)'}
@@ -74,13 +76,16 @@ name, setting, object, mystery, title pattern, opening event, or ending. If the 
 still avoid stock AI defaults such as Ella, Luna, Lily, Maya, Leo, Oliver, Finn, or Pip, and
 avoid defaulting to whispering lights, glowing forests, forgotten towns, magical clocks, or
 fallen stars unless the creator explicitly asks for them.
+The new concept must differ from recent ideas in at least five ways: character age or role,
+setting, time or weather, main goal, important object, story problem, turning point, ending,
+or title pattern. Do not only rename an old character and repeat the same plot.
 Recent ideas:
 {recent_idea_lines}
 
 Return one JSON object with string fields named topic, title, description, and hashtags.
-The topic should be one specific story premise written in plain everyday English. The title
-should be natural, intriguing, and concise without clickbait or difficult words. The description
-should be two clear sentences. Hashtags should contain 4-6 relevant tags separated by spaces.
+The topic should be one specific story premise written in very simple everyday English. The
+title should be natural, intriguing, short, and free of difficult words. The description
+should be two short, clear sentences. Hashtags should contain 4-6 relevant tags separated by spaces.
 Return JSON only."""
 
     try:

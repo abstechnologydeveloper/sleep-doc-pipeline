@@ -48,7 +48,7 @@ SAFETY_FALLBACK_PROMPT = (
 )
 SCENE_PLAN_FILENAME = "scene_plan.json"
 THUMBNAIL_STEM = "thumbnail_source"
-PLAN_VERSION = 2
+PLAN_VERSION = 3
 
 
 class ImageBudgetExceeded(RuntimeError):
@@ -320,6 +320,20 @@ a fitting coherent visual medium: realistic cinema for adult
 realistic stories, age-appropriate 2D or 3D animation for children, historical realism,
 fantasy illustration, gentle gothic suspense, nature documentary, or another suitable style.
 Never imitate a named artist, studio, franchise, or copyrighted character.
+
+Make this video visually distinct from a generic AI story. Derive its cast, locations,
+time period, weather, color palette, lighting, architecture, props, and camera language from
+the exact title and narration. Do not automatically use blue night scenes, warm glowing
+windows, magical glowing objects, mist, a forest, or the same centered portrait unless the
+story clearly calls for them. Vary wide, medium, close, low, high, over-shoulder, and
+environmental compositions according to the action. Give this story its own recognisable
+visual identity and repeat that identity only where continuity requires it.
+
+Cast people for their actual role in this story. Vary age, facial structure, skin tone, body
+shape, hair, clothing, occupation, and signs of lived experience. Do not default to the same
+young, slim, conventionally attractive model in every role. Historical people must look
+appropriate to their documented place, period, work, and social setting. Children must look
+their stated age. Do not make unrelated characters resemble one another.
 
 Create continuity registries for every recurring character, location, and important prop.
 Give every recurring character one immutable canonical_description containing their face,
