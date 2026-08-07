@@ -296,6 +296,9 @@ Use original language and follow these writing rules:
 {title_rule}
 - Establish one clear central character or focal subject, what they want or need, and the
   main story question early. Do not spend a long opening only describing atmosphere.
+- Treat every character species, age, role, relationship, location, period, and important
+  object explicitly supplied by the creator as binding. Never turn an animal, bird, fish,
+  object, cloud, or imaginary being into a human merely because it speaks, works, or dresses.
 - Build a cause-and-effect chain: each important action, discovery, decision, and consequence
   must grow naturally from what happened before. Avoid coincidences that solve the problem.
 - Give the middle real progress and change. Add a complication, useful discovery, reversal,

@@ -190,7 +190,7 @@ def main() -> None:
     except (OSError, json.JSONDecodeError) as exc:
         raise SystemExit(f"Could not read scene plan: {exc}") from exc
 
-    if plan.get("version") in {2, 3, 4} and isinstance(plan.get("scenes"), list):
+    if plan.get("version") in {2, 3, 4, 5} and isinstance(plan.get("scenes"), list):
         scene_ids = [str(scene.get("id", "")) for scene in plan["scenes"]]
     else:
         scene_ids = [

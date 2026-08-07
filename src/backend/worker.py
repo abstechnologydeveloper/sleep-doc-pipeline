@@ -213,6 +213,152 @@ def run_automatic(job, log_file, recent_script_paths: list[str] | None = None) -
     return newest_video(existing_videos)
 
 
+def run_stage_process(job, log_file, command: list[str], *, optional: bool = False) -> bool:
+    """Run one resumable review stage with heartbeat and cancellation support."""
+    process = subprocess.Popen(
+        command,
+        cwd=BASE_DIR,
+        stdout=log_file,
+        stderr=subprocess.STDOUT,
+        start_new_session=True,
+    )
+    started_at = time.monotonic()
+    next_heartbeat = started_at
+    runtime_limit_seconds = max(
+        30 * 60,
+        min(180 * 60, (float(job.get("minutes") or 1) * 4 + 30) * 60),
+    )
+
+    def stop_process() -> None:
+        try:
+            os.killpg(process.pid, signal.SIGTERM)
+            process.wait(timeout=10)
+        except ProcessLookupError:
+            return
+        except subprocess.TimeoutExpired:
+            os.killpg(process.pid, signal.SIGKILL)
+            process.wait()
+
+    while process.poll() is None:
+        now = time.monotonic()
+        if now >= next_heartbeat:
+            database.touch_processing_job(int(job["id"]))
+            next_heartbeat = now + HEARTBEAT_SECONDS
+        if database.cancellation_requested(job["id"]):
+            stop_process()
+            raise JobCancelled
+        if now - started_at > runtime_limit_seconds:
+            stop_process()
+            raise RuntimeError("This creation stage exceeded its safe time limit.")
+        time.sleep(1)
+    if process.returncode:
+        if optional:
+            print(
+                f"Optional stage skipped after exit code {process.returncode}.",
+                file=log_file,
+                flush=True,
+            )
+            return False
+        raise subprocess.CalledProcessError(process.returncode, process.args)
+    return True
+
+
+def review_pipeline_stage(
+    job, log_file, recent_script_paths: list[str] | None = None
+) -> tuple[str | None, Path | None]:
+    """Produce exactly one reviewable artifact, or return the approved final video."""
+    stage = str(job.get("review_stage") or "")
+    script_path = None
+    configured_script = job.get("script_path")
+    if configured_script and Path(str(configured_script)).is_file():
+        script_path = Path(str(configured_script)).resolve()
+    elif stage:
+        script_path = resumable_script(job)
+    python = sys.executable
+    common_story_args = [
+        "--title", job["title"],
+        "--niche", job.get("creator_niche") or "",
+        "--audience", job.get("target_audience") or "",
+        "--content-style", job.get("content_style") or "cinematic",
+    ]
+
+    if stage in {"", "script_regenerate"}:
+        if script_path is None:
+            existing_scripts = set(SCRIPTS_DIR.glob("*.txt"))
+            command = [
+                python, str(BASE_DIR / "generate_script.py"),
+                "--minutes", str(job["minutes"]),
+                "--goal", job.get("creator_goal") or "",
+                *common_story_args,
+            ]
+            for recent_path in recent_script_paths or []:
+                command.extend(["--recent-script", recent_path])
+            command.extend(["--", job["topic"]])
+            run_stage_process(job, log_file, command)
+            new_scripts = [
+                path for path in SCRIPTS_DIR.glob("*.txt")
+                if path not in existing_scripts
+            ]
+            if not new_scripts:
+                raise RuntimeError("The script stage finished without saving a script.")
+            script_path = max(new_scripts, key=lambda path: path.stat().st_mtime_ns).resolve()
+            database.update_job(
+                int(job["id"]), "processing", script_path=str(script_path)
+            )
+        return "script", None
+
+    if script_path is None:
+        raise RuntimeError("The approved script file is no longer available.")
+
+    image_command = [
+        python, str(BASE_DIR / "generate_images.py"), str(script_path),
+        *common_story_args,
+        "--max-images", str(job.get("max_images") or 8),
+    ]
+    if stage == "script_approved":
+        run_stage_process(job, log_file, [*image_command, "--plan-only"])
+        return "storyboard", None
+    if stage == "storyboard_approved":
+        run_stage_process(job, log_file, image_command)
+        return "images", None
+    if stage == "images_approved":
+        run_stage_process(
+            job,
+            log_file,
+            [
+                python, str(BASE_DIR / "generate_audio.py"), str(script_path),
+                "--voice", job.get("narration_voice") or "Kore",
+                "--voice-direction", job.get("voice_direction") or "neutral",
+            ],
+        )
+        return "audio", None
+    if stage == "audio_approved":
+        run_stage_process(
+            job,
+            log_file,
+            [python, str(BASE_DIR / "generate_sounds.py"), str(script_path)],
+            optional=True,
+        )
+        run_stage_process(
+            job,
+            log_file,
+            [
+                python, str(BASE_DIR / "assemble_video.py"), str(script_path),
+                "--title", job["title"],
+            ],
+        )
+        video_path = VIDEOS_DIR / f"{script_path.stem}.mp4"
+        if not video_path.is_file():
+            raise RuntimeError("The rough video stage did not save a video.")
+        return "rough", video_path
+    if stage == "rough_approved":
+        video_path = VIDEOS_DIR / f"{script_path.stem}.mp4"
+        if not video_path.is_file():
+            raise RuntimeError("The approved rough video is no longer available.")
+        return None, video_path
+    raise RuntimeError(f"Unsupported review stage: {stage}")
+
+
 def cleanup_generated_media(video_path: Path) -> None:
     """Remove successful pipeline working media after durable R2 storage."""
     stem = video_path.stem
@@ -322,29 +468,30 @@ def process_job(job) -> None:
         with ExitStack() as stack:
             with log_path.open("a", encoding="utf-8") as log_file:
                 if job["kind"] == "automatic":
-                    print("Preparing topic and post metadata...", file=log_file, flush=True)
                     recent_ideas = database.recent_story_ideas(
                         int(job["owner_id"]), int(job["id"])
                     )
                     recent_script_paths = database.recent_story_script_paths(
                         int(job["owner_id"]), int(job["id"])
                     )
-                    metadata = generate_post_metadata(
-                        topic=job["topic"] or "",
-                        title=job["title"] or "",
-                        description=job["description"] or "",
-                        hashtags=job["hashtags"] or "",
-                        niche=job.get("creator_niche") or "",
-                        audience=job.get("target_audience") or "",
-                        content_style=job.get("content_style") or "",
-                        creator_goal=job.get("creator_goal") or "",
-                        search_keyword=job.get("search_keyword") or "",
-                        recent_ideas=recent_ideas,
-                    )
-                    if database.cancellation_requested(job["id"]):
-                        raise JobCancelled
-                    job.update(metadata)
-                    database.update_job(job["id"], "processing", **metadata)
+                    if not job.get("review_stage") and not job.get("script_path"):
+                        print("Preparing topic and post metadata...", file=log_file, flush=True)
+                        metadata = generate_post_metadata(
+                            topic=job["topic"] or "",
+                            title=job["title"] or "",
+                            description=job["description"] or "",
+                            hashtags=job["hashtags"] or "",
+                            niche=job.get("creator_niche") or "",
+                            audience=job.get("target_audience") or "",
+                            content_style=job.get("content_style") or "",
+                            creator_goal=job.get("creator_goal") or "",
+                            search_keyword=job.get("search_keyword") or "",
+                            recent_ideas=recent_ideas,
+                        )
+                        if database.cancellation_requested(job["id"]):
+                            raise JobCancelled
+                        job.update(metadata)
+                        database.update_job(job["id"], "processing", **metadata)
                     if storage.is_remote(job.get("video_path")):
                         print("Reusing finished video from R2...", file=log_file, flush=True)
                         video_path = stack.enter_context(
@@ -352,9 +499,27 @@ def process_job(job) -> None:
                         )
                     else:
                         print(f"Topic: {job['topic']}", file=log_file, flush=True)
-                        video_path = run_automatic(
+                        next_review, video_path = review_pipeline_stage(
                             job, log_file, recent_script_paths
                         )
+                        if next_review:
+                            review_metadata = (
+                                creative_metadata_for_video(video_path)
+                                if video_path else job.get("creative_metadata") or "{}"
+                            )
+                            database.update_job(
+                                job["id"],
+                                "awaiting_review",
+                                review_stage=next_review,
+                                creative_metadata=review_metadata,
+                            )
+                            notify_creator(
+                                job.get("owner_id"),
+                                f"Video #{job.get('owner_job_number') or job['id']} is ready for your {next_review} review.",
+                            )
+                            return
+                        if video_path is None:
+                            raise RuntimeError("The approved workflow returned no final video.")
                         generated_video = video_path
                         database.update_job(
                             job["id"],
