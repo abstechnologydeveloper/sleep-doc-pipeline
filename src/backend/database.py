@@ -108,6 +108,8 @@ def initialize() -> None:
                 error TEXT,
                 creative_metadata TEXT NOT NULL DEFAULT '{}',
                 review_stage TEXT NOT NULL DEFAULT '',
+                script_mode TEXT NOT NULL DEFAULT 'ai',
+                provided_script TEXT NOT NULL DEFAULT '',
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
@@ -248,6 +250,8 @@ def initialize() -> None:
             ALTER TABLE jobs ADD COLUMN IF NOT EXISTS youtube_privacy TEXT NOT NULL DEFAULT 'private';
             ALTER TABLE jobs ADD COLUMN IF NOT EXISTS creative_metadata TEXT NOT NULL DEFAULT '{}';
             ALTER TABLE jobs ADD COLUMN IF NOT EXISTS review_stage TEXT NOT NULL DEFAULT '';
+            ALTER TABLE jobs ADD COLUMN IF NOT EXISTS script_mode TEXT NOT NULL DEFAULT 'ai';
+            ALTER TABLE jobs ADD COLUMN IF NOT EXISTS provided_script TEXT NOT NULL DEFAULT '';
             ALTER TABLE jobs ALTER COLUMN youtube_privacy SET DEFAULT 'public';
             ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS paystack_customer_code TEXT NOT NULL DEFAULT '';
             ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS payment_reference TEXT NOT NULL DEFAULT '';
@@ -615,6 +619,8 @@ def create_story_job(
     description: str,
     hashtags: str,
     search_keyword: str,
+    script_mode: str,
+    provided_script: str,
     platforms: list[str],
     scheduled_at: str | None,
     active_limit: int = 1,
@@ -663,11 +669,12 @@ def create_story_job(
         cursor = db.execute(
             """INSERT INTO jobs
             (owner_id, owner_job_number, kind, status, topic, minutes, title, description, hashtags,
-             search_keyword,
-             platforms, scheduled_at, source_path, narration_voice, voice_direction, max_images,
-             creator_niche, target_audience, content_style, creator_goal,
+            search_keyword,
+            platforms, scheduled_at, source_path, narration_voice, voice_direction, max_images,
+             creator_niche, target_audience, content_style, creator_goal, script_mode,
+             provided_script,
              created_at, updated_at)
-            VALUES (?, ?, 'automatic', 'queued', ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, 'automatic', 'queued', ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             RETURNING id""",
             (
                 owner_id,
@@ -687,6 +694,8 @@ def create_story_job(
                 user["target_audience"],
                 user["content_style"],
                 user["creator_goal"],
+                script_mode,
+                provided_script,
                 now,
                 now,
             ),
@@ -1561,19 +1570,22 @@ def continue_review(job_id: int, owner_id: int, expected_stage: str) -> bool:
     transitions = {
         "script": "script_approved",
         "storyboard": "storyboard_approved",
-        "images": "images_approved",
+        "images": "thumbnail_generate",
+        "thumbnail": "thumbnail_approved",
         "audio": "audio_approved",
+        "sounds": "sounds_approved",
         "rough": "rough_approved",
     }
     next_stage = transitions.get(expected_stage)
     if not next_stage:
         return False
     with connect() as db:
+        next_status = "queued"
         row = db.execute(
-            """UPDATE jobs SET status='queued', review_stage=?, error=NULL, updated_at=?
+            """UPDATE jobs SET status=?, review_stage=?, error=NULL, updated_at=?
             WHERE id=? AND owner_id=? AND status='awaiting_review' AND review_stage=?
             RETURNING id""",
-            (next_stage, utc_now(), job_id, owner_id, expected_stage),
+            (next_status, next_stage, utc_now(), job_id, owner_id, expected_stage),
         ).fetchone()
         return bool(row)
 
@@ -1584,8 +1596,10 @@ def restart_review_stage(job_id: int, owner_id: int, stage: str) -> bool:
         "script": "",
         "storyboard": "script_approved",
         "images": "storyboard_approved",
-        "audio": "images_approved",
-        "rough": "audio_approved",
+        "thumbnail": "thumbnail_regenerate",
+        "audio": "thumbnail_approved",
+        "sounds": "audio_approved",
+        "rough": "sounds_approved",
     }.get(stage)
     if restart_from is None:
         return False

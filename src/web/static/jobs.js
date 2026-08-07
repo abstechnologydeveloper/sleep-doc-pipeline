@@ -30,6 +30,14 @@
   });
 
   const topicInput = document.querySelector("[data-topic-input]");
+  const scriptMode = document.querySelector("[data-script-mode]");
+  const updateScriptMode = () => {
+    const provided = scriptMode?.value === "provided";
+    document.querySelectorAll("[data-ai-story]").forEach((node) => { node.hidden = provided; });
+    document.querySelectorAll("[data-provided-story]").forEach((node) => { node.hidden = !provided; });
+  };
+  scriptMode?.addEventListener("change", updateScriptMode);
+  updateScriptMode();
   document.querySelectorAll("[data-prompt-starter]").forEach((button) => {
     button.addEventListener("click", () => {
       if (!topicInput) return;

@@ -82,6 +82,85 @@ def weak_opening_reason(script: str) -> str:
     return ""
 
 
+ANIMAL_SPECIES = (
+    "red panda", "river otter", "sea otter", "otter", "rabbit", "hare", "fox",
+    "wolf", "lion", "tiger", "bear", "panda", "elephant", "giraffe", "zebra",
+    "deer", "moose", "horse", "donkey", "cow", "goat", "sheep", "pig", "dog",
+    "cat", "mouse", "rat", "hamster", "squirrel", "raccoon", "badger", "beaver",
+    "hedgehog", "owl", "eagle", "hawk", "crow", "raven", "pigeon", "parrot",
+    "penguin", "duck", "goose", "swan", "crane", "turtle", "frog", "fish",
+    "dolphin", "whale", "shark", "octopus", "butterfly", "bee",
+)
+APPEARANCE_ITEMS = (
+    "raincoat", "scarf", "coat", "jacket", "hat", "dress", "shirt", "sweater",
+    "trousers", "pants", "boots", "glasses", "uniform", "apron",
+)
+
+
+def repeated_internal_passages(text: str) -> int:
+    """Count repeated three-sentence passages inside one narration."""
+    sentences = []
+    for sentence in re.split(r"(?<=[.!?])(?:[\"'”’]*)\s+", text):
+        normalized = " ".join(WORD_PATTERN.findall(sentence.lower()))
+        if len(normalized.split()) >= 4:
+            sentences.append(normalized)
+    windows = []
+    for index in range(max(0, len(sentences) - 2)):
+        window = " ".join(sentences[index:index + 3])
+        if len(window.split()) >= 18:
+            windows.append(hashlib.sha256(window.encode("utf-8")).hexdigest())
+    counts = Counter(windows)
+    return sum(count - 1 for count in counts.values() if count > 1)
+
+
+def story_validation_issues(script: str, topic: str) -> list[str]:
+    """Return zero-cost blockers that must be fixed before paid image generation."""
+    issues = []
+    opening_words = script.split()[:120]
+    opening = " ".join(opening_words).lower()
+    topic_text = topic or ""
+    topic_lower = topic_text.lower()
+    main_match = re.search(
+        r"\bmain character (?:is named|is|named)\s+([A-Z][A-Za-z'-]{1,30})\b",
+        topic_text,
+    )
+    main_name = main_match.group(1) if main_match else ""
+    main_context = (
+        topic_text[main_match.start():main_match.end() + 220]
+        if main_match else topic_text[:260]
+    ).lower()
+    required_species = next(
+        (species for species in ANIMAL_SPECIES if re.search(
+            rf"\b{re.escape(species)}s?\b", main_context
+        )),
+        "",
+    )
+    required_items = [
+        item for item in APPEARANCE_ITEMS
+        if re.search(rf"\b{re.escape(item)}s?\b", main_context)
+    ]
+    if main_name and main_name.lower() not in " ".join(script.split()[:80]).lower():
+        issues.append(f"Put {main_name}'s name in the opening 80 words.")
+    if required_species and not re.search(
+        rf"\b{re.escape(required_species)}s?\b", opening
+    ):
+        issues.append(
+            f"State that {main_name or 'the lead'} is a {required_species} in the opening."
+        )
+    missing_items = [item for item in required_items if item not in opening]
+    if missing_items:
+        issues.append(
+            "Show the lead's fixed appearance near the beginning: "
+            + ", ".join(missing_items) + "."
+        )
+    if any(phrase in topic_lower for phrase in ("no humans", "no human", "all-animal")):
+        if re.search(r"\b(?:human|person|people|man|woman|boy|girl)s?\b", script.lower()):
+            issues.append("Remove human characters because this is an animal-only world.")
+    if repeated_internal_passages(script):
+        issues.append("Remove the repeated three-sentence passage or duplicated ending.")
+    return issues
+
+
 def needs_grounded_research(niche: str, topic: str) -> bool:
     """Return whether a topic needs evidence before it becomes narration."""
     return bool(FACTUAL_NICHE_PATTERN.search(f"{niche} {topic}"))
@@ -654,13 +733,16 @@ def main() -> None:
         )
         repeated_content = repeated_count >= 3 and repeated_ratio >= 0.04
         opening_issue = weak_opening_reason(script)
-        if not repeated_content and not opening_issue:
+        validation_issues = story_validation_issues(script, topic)
+        if not repeated_content and not opening_issue and not validation_issues:
             break
         if generation_attempt == 0:
             reason = (
                 "The draft repeated recent story passages"
                 if repeated_content
                 else f"The draft used a {opening_issue}"
+                if opening_issue
+                else validation_issues[0]
             )
             print(f"{reason}; generating a fresh version...")
         elif repeated_content:

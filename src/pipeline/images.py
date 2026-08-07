@@ -896,7 +896,7 @@ def review_image_batch(
 def review_and_repair_images(
     *, image_dir: Path, scenes: list[dict], thumbnail_prompt: str,
     gemini_api_key: str, account_id: str, api_token: str,
-    image_model: str, story_seed: int,
+    image_model: str, story_seed: int, include_scenes: bool = True,
 ) -> None:
     """Review distinct assets once and regenerate only confident severe failures."""
     manifest_path = image_dir / IMAGE_REVIEW_FILENAME
@@ -909,7 +909,7 @@ def review_and_repair_images(
 
     review_items: list[tuple[str, Path, str]] = []
     prompts: dict[str, str] = {}
-    for scene in scenes:
+    for scene in scenes if include_scenes else []:
         if scene.get("reuse_scene_id"):
             continue
         item_id = str(scene["id"])
@@ -1056,7 +1056,19 @@ def main() -> None:
         action="store_true",
         help="Save the storyboard for human review without generating images",
     )
+    parser.add_argument(
+        "--scenes-only",
+        action="store_true",
+        help="Generate approved story scenes without spending a thumbnail request",
+    )
+    parser.add_argument(
+        "--thumbnail-only",
+        action="store_true",
+        help="Generate only the thumbnail after story images are approved",
+    )
     args = parser.parse_args()
+    if sum((args.plan_only, args.scenes_only, args.thumbnail_only)) > 1:
+        parser.error("Choose only one staged generation option")
 
     script_path = select_script(args.script_path)
     if not script_path.exists():
@@ -1136,6 +1148,47 @@ def main() -> None:
         f"{distinct_count} distinct images."
     )
 
+    def ensure_thumbnail_source() -> None:
+        existing_thumbnail = next(
+            (
+                image_dir / f"{THUMBNAIL_STEM}{suffix}"
+                for suffix in (".jpg", ".jpeg", ".png")
+                if (image_dir / f"{THUMBNAIL_STEM}{suffix}").exists()
+            ),
+            None,
+        )
+        if existing_thumbnail:
+            print("  Dedicated thumbnail source already done, skipping.")
+            return
+        print("  Generating dedicated thumbnail source...")
+        thumbnail_data, thumbnail_suffix = generate_image(
+            account_id,
+            api_token,
+            visual_plan["thumbnail_prompt"],
+            image_model,
+            story_seed + int(hashlib.sha256(b"thumbnail").hexdigest()[:6], 16),
+        )
+        thumbnail_path = image_dir / f"{THUMBNAIL_STEM}{thumbnail_suffix}"
+        temporary_path = image_dir / f"{THUMBNAIL_STEM}.generating{thumbnail_suffix}"
+        temporary_path.write_bytes(thumbnail_data)
+        temporary_path.replace(thumbnail_path)
+
+    if args.thumbnail_only:
+        ensure_thumbnail_source()
+        review_and_repair_images(
+            image_dir=image_dir,
+            scenes=scene_entries,
+            thumbnail_prompt=visual_plan["thumbnail_prompt"],
+            gemini_api_key=gemini_api_key,
+            account_id=account_id,
+            api_token=api_token,
+            image_model=image_model,
+            story_seed=story_seed,
+            include_scenes=False,
+        )
+        print(f"Thumbnail ready for review in {image_dir}")
+        return
+
     pending_scenes = []
     for i, scene in enumerate(scene_entries, start=1):
         image_stem = scene["id"]
@@ -1208,29 +1261,22 @@ def main() -> None:
                 f"{scene['id']} reuses {reused_scene_id}, but its source image could not be created."
             )
 
-    existing_thumbnail = next(
-        (
-            image_dir / f"{THUMBNAIL_STEM}{suffix}"
-            for suffix in (".jpg", ".jpeg", ".png")
-            if (image_dir / f"{THUMBNAIL_STEM}{suffix}").exists()
-        ),
-        None,
-    )
-    if existing_thumbnail:
-        print("  Dedicated thumbnail source already done, skipping.")
-    else:
-        print("  Generating dedicated thumbnail source...")
-        thumbnail_data, thumbnail_suffix = generate_image(
-            account_id,
-            api_token,
-            visual_plan["thumbnail_prompt"],
-            image_model,
-            story_seed + int(hashlib.sha256(b"thumbnail").hexdigest()[:6], 16),
+    if args.scenes_only:
+        print("Reviewing generated story images for severe visual problems...")
+        review_and_repair_images(
+            image_dir=image_dir,
+            scenes=scene_entries,
+            thumbnail_prompt=visual_plan["thumbnail_prompt"],
+            gemini_api_key=gemini_api_key,
+            account_id=account_id,
+            api_token=api_token,
+            image_model=image_model,
+            story_seed=story_seed,
         )
-        thumbnail_path = image_dir / f"{THUMBNAIL_STEM}{thumbnail_suffix}"
-        temporary_path = image_dir / f"{THUMBNAIL_STEM}.generating{thumbnail_suffix}"
-        temporary_path.write_bytes(thumbnail_data)
-        temporary_path.replace(thumbnail_path)
+        print(f"Story images ready for review in {image_dir}")
+        return
+
+    ensure_thumbnail_source()
 
     print("Reviewing generated images for severe visual problems...")
     review_and_repair_images(
