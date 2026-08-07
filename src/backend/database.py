@@ -690,10 +690,10 @@ def create_story_job(
                 user["narration_voice"],
                 user["voice_direction"],
                 user["max_images_per_job"],
-                user["creator_niche"],
-                user["target_audience"],
-                user["content_style"],
-                user["creator_goal"],
+                "",
+                "",
+                "",
+                "",
                 script_mode,
                 provided_script,
                 now,
@@ -1143,19 +1143,16 @@ def update_user_limits(
 
 
 def update_creator_settings(
-    user_id: int, *, name: str, channel_name: str, creator_niche: str,
-    target_audience: str, content_style: str, creator_goal: str,
-    narration_voice: str, voice_direction: str, default_story_minutes: float
+    user_id: int, *, name: str, channel_name: str, narration_voice: str,
+    voice_direction: str, default_story_minutes: float
 ) -> None:
     with connect() as db:
         db.execute(
-            """UPDATE users SET name=?, channel_name=?, creator_niche=?,
-            target_audience=?, content_style=?, creator_goal=?, narration_voice=?,
+            """UPDATE users SET name=?, channel_name=?, narration_voice=?,
             voice_direction=?, default_story_minutes=?, updated_at=?
             WHERE id=? AND role='creator'""",
-            (name, channel_name, creator_niche, target_audience, content_style,
-             creator_goal, narration_voice, voice_direction, default_story_minutes,
-             utc_now(), user_id),
+            (name, channel_name, narration_voice, voice_direction,
+             default_story_minutes, utc_now(), user_id),
         )
 
 

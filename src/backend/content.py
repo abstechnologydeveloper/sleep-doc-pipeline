@@ -18,10 +18,6 @@ def generate_post_metadata(
     title: str = "",
     description: str = "",
     hashtags: str = "",
-    niche: str = "",
-    audience: str = "",
-    content_style: str = "",
-    creator_goal: str = "",
     search_keyword: str = "",
     recent_ideas: list[str] | None = None,
 ) -> dict[str, str]:
@@ -43,8 +39,8 @@ def generate_post_metadata(
     ) or "- None yet"
 
     prompt = f"""Create the missing fields for one original storytelling video.
-The concept must be easy to understand, fun to follow, and suitable for the creator's stated
-audience and goal. Give it a clear character, goal, curiosity hook, and a few
+The concept must be easy to understand, fun to follow, and suitable for the audience implied
+by this video's idea. Give it a clear character, goal, curiosity hook, and a few
 small discoveries instead of relying only on atmosphere. It may be playful, cozy, historical,
 mysterious, gently eerie, for children, or for adults, but never graphic, childish when
 the audience is adult, or based closely on an existing copyrighted story.
@@ -60,13 +56,7 @@ Existing values must be preserved when present:
 - description: {supplied['description'] or '(generate this)'}
 - hashtags: {supplied['hashtags'] or '(generate this)'}
 
-Creator profile guidance:
-- niche: {niche or 'general storytelling'}
-- target audience: {audience or 'a general storytelling audience'}
-- preferred picture style: {content_style or 'choose what fits the story'}
-- creator's goal: {creator_goal or 'make an enjoyable original video'}
 - vidIQ-validated target search phrase: {search_keyword or '(none supplied)'}
-Use this guidance when generating missing fields, but do not mention the profile itself.
 When a target search phrase is supplied, keep the concept relevant to its real search intent,
 use the phrase once naturally in the title when it reads well, and once in the first sentence
 of the description. Never repeat it unnaturally or change factual claims to force it in.
