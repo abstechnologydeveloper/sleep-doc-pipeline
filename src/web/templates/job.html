@@ -44,6 +44,18 @@
   </aside>
 </div>
 
+{% if creative_metadata %}
+<section class="panel">
+  <div class="section-heading"><div><h2>Creative checks</h2><p>See how this video was planned and checked.</p></div></div>
+  <dl class="detail-list">
+    {% if creative_metadata.thumbnail_hook %}<dt>Thumbnail words</dt><dd>{{ creative_metadata.thumbnail_hook }}</dd>{% endif %}
+    {% if creative_metadata.quality %}<dt>Video check</dt><dd>{{ 'Passed' if creative_metadata.quality.passed else 'Needs attention' }} · {{ creative_metadata.quality.resolution or '' }} · {{ creative_metadata.quality.distinct_images or 0 }} different pictures</dd>{% endif %}
+    {% if creative_metadata.project_profile and creative_metadata.project_profile.palette %}<dt>Colors</dt><dd>{{ creative_metadata.project_profile.palette }}</dd>{% endif %}
+  </dl>
+  {% if creative_metadata.retention_checkpoints %}<details><summary>Story attention points</summary><ol>{% for point in creative_metadata.retention_checkpoints %}<li><strong>{{ point.role|replace('_', ' ')|title }}</strong> — {{ point.viewer_question }}{% if point.visual_change %}<small>{{ point.visual_change }}</small>{% endif %}</li>{% endfor %}</ol></details>{% endif %}
+</section>
+{% endif %}
+
 {% if not is_admin and job.video_path and shareable %}
 <section class="panel" id="publish-video">
   <div class="section-heading"><div><p class="eyebrow">Publish this video</p><h2>Send it to your channel</h2><p>Check the details below, then publish this finished video without creating another job.</p></div></div>
@@ -90,7 +102,7 @@
     <div class="section-heading"><div><h2>Publishing</h2><p>See whether this video was sent to your channel.</p></div></div>
     <div class="connector-list">
     {% for item in publications %}
-      <div class="connector-row"><span class="platform-mark">{{ item.platform[0]|upper }}</span><span><strong>{{ item.platform|title }}</strong>{% if item.error %}<small>{{ item.error if is_admin else 'This channel needs attention before the video can be sent.' }}</small>{% endif %}</span><span class="status status-{{ item.status }}">{{ item.status|friendly_status }}</span></div>
+      <div class="connector-row"><span class="platform-mark">{{ item.platform[0]|upper }}</span><span><strong>{{ item.platform|title }}</strong>{% if item.error %}<small>{{ item.error if is_admin else 'This channel needs attention before the video can be sent.' }}</small>{% endif %}{% if item.analytics_url %}<small><a href="{{ item.analytics_url }}" target="_blank" rel="noopener">Open real performance in YouTube Studio</a></small>{% endif %}</span><span class="status status-{{ item.status }}">{{ item.status|friendly_status }}</span></div>
     {% else %}<div class="empty-panel">No publishing platforms were selected.</div>{% endfor %}
     </div>
   </section>

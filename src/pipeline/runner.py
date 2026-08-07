@@ -11,6 +11,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -141,6 +142,8 @@ def validate_environment() -> None:
         missing.append("CLOUDFLARE_API_TOKEN")
     if not shutil.which("ffmpeg"):
         missing.append("ffmpeg executable")
+    if not shutil.which("ffprobe"):
+        missing.append("ffprobe executable")
 
     missing_steps = [
         filename for filename in PIPELINE_STEPS if not (BASE_DIR / filename).is_file()
@@ -155,13 +158,30 @@ def validate_environment() -> None:
 
 def run_step(label: str, command: list[str]) -> None:
     print(f"\n{'=' * 60}\n{label}\n{'=' * 60}")
+    started_at = time.monotonic()
     try:
         subprocess.run(command, cwd=BASE_DIR, check=True)
     except subprocess.CalledProcessError as exc:
+        elapsed = time.monotonic() - started_at
+        print(f"Stage stopped after {elapsed:.1f} seconds.")
         raise SystemExit(
             f"{label} failed with exit code {exc.returncode}. "
             "Fix the reported error, then rerun the pipeline."
         ) from exc
+    print(f"Stage completed in {time.monotonic() - started_at:.1f} seconds.")
+
+
+def run_optional_step(label: str, command: list[str]) -> None:
+    """Run an enhancement without allowing it to stop the core video."""
+    print(f"\n{'=' * 60}\n{label}\n{'=' * 60}")
+    started_at = time.monotonic()
+    result = subprocess.run(command, cwd=BASE_DIR, check=False)
+    if result.returncode:
+        print(
+            f"Warning: {label} was skipped after exit code {result.returncode}. "
+            "The video will continue without optional sound effects."
+        )
+    print(f"Optional stage finished in {time.monotonic() - started_at:.1f} seconds.")
 
 
 def snapshot_scripts() -> dict[Path, int]:
@@ -237,6 +257,8 @@ def main() -> None:
                 args.audience,
                 "--goal",
                 args.goal,
+                "--title",
+                args.title,
                 "--content-style",
                 args.content_style,
                 *recent_script_args,
@@ -275,7 +297,7 @@ def main() -> None:
             *(["--max-images", str(args.max_images)] if args.max_images else []),
         ],
     )
-    run_step(
+    run_optional_step(
         "4/5 Generating optional story sound effects",
         [python, str(BASE_DIR / "generate_sounds.py"), str(script_path)],
     )

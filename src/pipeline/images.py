@@ -47,8 +47,9 @@ SAFETY_FALLBACK_PROMPT = (
     "cinematic wide shot, no people, no text, no watermark, high detail"
 )
 SCENE_PLAN_FILENAME = "scene_plan.json"
+IMAGE_REVIEW_FILENAME = "image_review.json"
 THUMBNAIL_STEM = "thumbnail_source"
-PLAN_VERSION = 3
+PLAN_VERSION = 4
 
 
 class ImageBudgetExceeded(RuntimeError):
@@ -306,6 +307,15 @@ Give each important setup, clue, reveal, relationship turn, character decision, 
 payoff, and final emotional resolution an honest matching visual beat. Do not use a generic
 atmosphere image when the narration describes a specific meaningful action.
 
+Art-direct the opening for viewer attention without changing the narration. The first image
+must show the exact person, animal, object, place, choice, or contradiction that creates the
+opening question; never begin with an empty landscape or generic establishing shot when a
+specific subject is available. Give the first roughly 30 seconds two to four distinct visual
+beats when the numbered narration contains real changes to show. For calm fiction, show the
+lead doing their role before the gentle surprise appears. For factual history, show the
+documented pivotal moment, people, place, object, map context, or decision without inventing a
+scene. After the hook is clear, let the visual pace settle naturally.
+
 The hard paid-image limit is {max_images}. You must stay within it. Preserve every narrative
 beat as a timed scene, but consolidate nearby events into stronger compositions and reuse the
 closest suitable earlier visual with a different camera movement when a new paid image would
@@ -329,11 +339,28 @@ story clearly calls for them. Vary wide, medium, close, low, high, over-shoulder
 environmental compositions according to the action. Give this story its own recognisable
 visual identity and repeat that identity only where continuity requires it.
 
+Choose a story-specific palette with named dominant, accent, shadow, and highlight colors.
+Use that palette consistently, but let lighting change naturally with time, place, emotion,
+and weather. Do not apply the same teal-and-orange, blue-night, or warm-window grade to every
+video. Design locations around the story's culture, work, geography, species, and period.
+
 Cast people for their actual role in this story. Vary age, facial structure, skin tone, body
 shape, hair, clothing, occupation, and signs of lived experience. Do not default to the same
 young, slim, conventionally attractive model in every role. Historical people must look
 appropriate to their documented place, period, work, and social setting. Children must look
 their stated age. Do not make unrelated characters resemble one another.
+
+Direct each character's pose, gaze, hands or paws, body tension, and facial expression around
+the exact action and emotion of that beat. For animated animal or object stories, combine
+clear readable emotion and human-like work or travel with real species traits, scale,
+movement, habitats, and abilities. Build a fresh world for the premise rather than reusing a
+generic animal city. Impossible clouds, weather, objects, or places must follow simple visual
+rules that remain consistent throughout the video.
+
+For factual history, prefer evidence-led visuals: accurate clothing, tools, buildings,
+landscape, maps without readable labels, routes, formations, documents, artifacts, scale
+comparisons, and clear before-versus-after context. Use visual progression to make chronology
+understandable without placing text or invented events inside the image.
 
 Create continuity registries for every recurring character, location, and important prop.
 Give every recurring character one immutable canonical_description containing their face,
@@ -354,7 +381,23 @@ place. The outgoing image must keep moving while the incoming image replaces it 
 Select sparse sound cues only for visible or strongly implied events; use stable scene_id
 values. Never create whooshes, swipes, impacts, or other sounds for visual transitions.
 
-Design a separate high-performing YouTube thumbnail concept. It must make one specific,
+Mark four to six honest retention checkpoints across longer videos: opening promise, early
+progress, midpoint change, late consequence, climax, and payoff. Each checkpoint must point
+to a real scene, state the viewer question being advanced, and describe the visible change.
+Short videos may use fewer checkpoints. Never invent a cliffhanger outside the narration.
+For sleep, bedtime, cozy, or relaxing stories, also choose one continuous low-detail ambience
+that belongs to the main location, such as the exact room tone, weather, transport rhythm,
+water, forest, or distant city texture. It must loop cleanly with no speech, melody, sudden
+event, loud animal call, or prominent foreground action. For other genres return null.
+
+Make the final two visual beats deliver the opening promise. Show the decisive action or
+supported historical answer, then one memorable result image that is visibly different from
+the opening while preserving continuity. Never finish on a random landscape, repeated filler
+image, or unresolved prop.
+
+Design three separate high-performing YouTube thumbnail concepts, then score each from 1 to
+10 for truthful curiosity, phone-size readability, emotional clarity, and title alignment.
+Select the highest useful total rather than the most dramatic concept. Each concept must make one specific,
 unanswered story question instantly visible while remaining completely honest to the video.
 Use one large, emotionally readable person, place, or object on the right third; one unusual
 but truthful visual detail that creates curiosity; strong warm-versus-cool color contrast;
@@ -365,7 +408,7 @@ words inside the generated image. For history, show a recognisable person, objec
 or disputed moment without inventing facts. For sleep stories, show a safe but irresistible
 place, arrival, light, doorway, train, room, or discovery without horror.
 
-Write a thumbnail_hook of 2 to 4 simple words. It must complement rather than repeat the
+For each candidate, write a thumbnail_hook of 2 to 4 simple words. It must complement rather than repeat the
 video title, expose the curiosity gap without answering it, and avoid generic phrases such as
 WHAT HAPPENS NEXT, YOU WON'T BELIEVE, MUST SEE, or THE TRUTH.
 
@@ -388,6 +431,11 @@ Return JSON only with:
   atmosphere (none, stars, rain, snow, embers, fog, motes)
 - sound_cues: sparse objects with scene_id, position (0 to 1), prompt, duration_seconds
   (0.5 to 4), volume (0.04 to 0.16), and kind
+- retention_checkpoints: ordered objects with scene_id, role, viewer_question, and visual_change
+- continuous_ambience: null or an object with prompt and volume (0.015 to 0.05)
+- thumbnail_candidates: exactly 3 objects containing hook, prompt, curiosity_question,
+  truthfulness_score, readability_score, emotion_score, and title_alignment_score (1 to 10)
+- selected_thumbnail_index: zero-based index of the strongest truthful candidate
 - thumbnail_hook: 2 to 4 simple curiosity words that complement the title
 - thumbnail_prompt: detailed native 16:9 prompt
 """
@@ -405,9 +453,52 @@ Return JSON only with:
         raw_plan = json.loads(response.text or "")
         scenes = materialize_scenes(raw_plan.get("scenes"), segments)
         distinct_scene_count = cap_distinct_scenes(scenes, max_images)
+        thumbnail_candidates = []
+        for candidate in raw_plan.get("thumbnail_candidates", [])[:3]:
+            if not isinstance(candidate, dict):
+                continue
+            candidate_hook = " ".join(
+                str(candidate.get("hook", "")).strip().strip('"\'').split()[:4]
+            ).upper()
+            candidate_prompt = str(candidate.get("prompt", "")).strip()
+            if not candidate_hook or not candidate_prompt:
+                continue
+            scores = {}
+            for score_name in (
+                "truthfulness_score", "readability_score", "emotion_score",
+                "title_alignment_score",
+            ):
+                try:
+                    scores[score_name] = min(
+                        10, max(1, int(candidate.get(score_name, 1)))
+                    )
+                except (TypeError, ValueError):
+                    scores[score_name] = 1
+            thumbnail_candidates.append(
+                {
+                    "hook": candidate_hook,
+                    "prompt": candidate_prompt[:1750],
+                    "curiosity_question": str(
+                        candidate.get("curiosity_question", "")
+                    ).strip()[:300],
+                    **scores,
+                    "score": sum(scores.values()),
+                }
+            )
+        selected_thumbnail = (
+            max(thumbnail_candidates, key=lambda candidate: candidate["score"])
+            if len(thumbnail_candidates) == 3 else None
+        )
         hook = " ".join(
-            str(raw_plan.get("thumbnail_hook", "")).strip().strip('"\'').split()[:4]
+            str(
+                selected_thumbnail["hook"]
+                if selected_thumbnail else raw_plan.get("thumbnail_hook", "")
+            ).strip().strip('"\'').split()[:4]
         ).upper()
+        thumbnail_prompt = (
+            selected_thumbnail["prompt"]
+            if selected_thumbnail else str(raw_plan.get("thumbnail_prompt", "")).strip()
+        )
         plan = {
             "version": PLAN_VERSION,
             "script_hash": hashlib.sha256(text.encode("utf-8")).hexdigest(),
@@ -416,9 +507,16 @@ Return JSON only with:
             "visual_bible": str(raw_plan.get("visual_bible", "")).strip(),
             "scenes": scenes,
             "sound_cues": raw_plan.get("sound_cues", []),
+            "retention_checkpoints": raw_plan.get("retention_checkpoints", []),
+            "continuous_ambience": raw_plan.get("continuous_ambience"),
+            "thumbnail_candidates": thumbnail_candidates,
+            "selected_thumbnail_index": (
+                thumbnail_candidates.index(selected_thumbnail)
+                if selected_thumbnail else None
+            ),
             "thumbnail_hook": hook or "LOOK CLOSER",
             "thumbnail_prompt": (
-                f"{str(raw_plan.get('thumbnail_prompt', '')).strip()[:1750]}{STYLE_SUFFIX}"
+                f"{thumbnail_prompt[:1750]}{STYLE_SUFFIX}"
             ),
             "planning_fallback": False,
         }
@@ -655,6 +753,149 @@ def generate_image(
     ) from last_error
 
 
+def image_file(path: Path) -> Path | None:
+    return next(
+        (
+            path.with_suffix(suffix)
+            for suffix in (".jpg", ".jpeg", ".png")
+            if path.with_suffix(suffix).is_file()
+        ),
+        None,
+    )
+
+
+def review_image_batch(
+    client: genai.Client, items: list[tuple[str, Path, str]]
+) -> dict[str, dict]:
+    """Identify only severe, regenerable image problems in one vision request."""
+    parts = [types.Part(text=(
+        "Review these generated storytelling images against their expected prompts. "
+        "Fail only for a severe visible problem: blank or nearly black output, unrelated "
+        "subject, accidental text or logo, badly broken anatomy, missing main subject, or "
+        "framing that hides the important action. Style preference alone is not a failure. "
+        "Return JSON only with a reviews array. Each review needs id, passed, confidence "
+        "from 0 to 1, and one short correction."
+    ))]
+    for item_id, path, expected_prompt in items:
+        mime_type = "image/png" if path.suffix.lower() == ".png" else "image/jpeg"
+        parts.append(types.Part(text=f"ID: {item_id}\nEXPECTED: {expected_prompt[:900]}"))
+        parts.append(types.Part.from_bytes(data=path.read_bytes(), mime_type=mime_type))
+    response = client.models.generate_content(
+        model="gemini-2.5-flash",
+        contents=[types.Content(role="user", parts=parts)],
+        config=types.GenerateContentConfig(
+            response_mime_type="application/json",
+            temperature=0.1,
+        ),
+    )
+    payload = json.loads(response.text or "")
+    reviews = payload.get("reviews", []) if isinstance(payload, dict) else []
+    return {
+        str(review.get("id")): review
+        for review in reviews
+        if isinstance(review, dict) and review.get("id")
+    }
+
+
+def review_and_repair_images(
+    *, image_dir: Path, scenes: list[dict], thumbnail_prompt: str,
+    gemini_api_key: str, account_id: str, api_token: str,
+    image_model: str, story_seed: int,
+) -> None:
+    """Review distinct assets once and regenerate only confident severe failures."""
+    manifest_path = image_dir / IMAGE_REVIEW_FILENAME
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        if not isinstance(manifest, dict):
+            manifest = {}
+    except (OSError, json.JSONDecodeError):
+        manifest = {}
+
+    review_items: list[tuple[str, Path, str]] = []
+    prompts: dict[str, str] = {}
+    for scene in scenes:
+        if scene.get("reuse_scene_id"):
+            continue
+        item_id = str(scene["id"])
+        path = image_file(image_dir / item_id)
+        if path is None:
+            continue
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        if manifest.get(item_id, {}).get("sha256") == digest:
+            continue
+        prompt = str(scene.get("prompt", ""))
+        prompts[item_id] = prompt
+        review_items.append((item_id, path, prompt))
+
+    thumbnail_path = image_file(image_dir / THUMBNAIL_STEM)
+    if thumbnail_path is not None:
+        digest = hashlib.sha256(thumbnail_path.read_bytes()).hexdigest()
+        if manifest.get(THUMBNAIL_STEM, {}).get("sha256") != digest:
+            prompts[THUMBNAIL_STEM] = thumbnail_prompt
+            review_items.append((THUMBNAIL_STEM, thumbnail_path, thumbnail_prompt))
+
+    if not review_items:
+        return
+    client = genai.Client(api_key=gemini_api_key)
+    for start in range(0, len(review_items), 6):
+        batch = review_items[start:start + 6]
+        try:
+            reviews = review_image_batch(client, batch)
+        except (
+            OSError, ValueError, TypeError, AttributeError, json.JSONDecodeError,
+            ConnectionError, TimeoutError,
+            genai_errors.ClientError, genai_errors.ServerError,
+        ) as exc:
+            print(f"  Warning: image quality review was skipped ({exc})")
+            return
+        for item_id, path, _prompt in batch:
+            review = reviews.get(item_id, {})
+            try:
+                confidence = float(review.get("confidence", 0))
+            except (TypeError, ValueError):
+                confidence = 0
+            passed = bool(review.get("passed", True))
+            correction = str(review.get("correction", "")).strip()[:300]
+            if not passed and confidence >= 0.8:
+                print(f"  Regenerating weak {item_id}: {correction or 'severe visual issue'}")
+                repair_prompt = (
+                    f"{prompts[item_id]} Correct this severe issue: {correction}. "
+                    "Keep the intended characters, action, setting, palette, and native 16:9 framing."
+                )
+                repair_seed = story_seed + int(
+                    hashlib.sha256(item_id.encode()).hexdigest()[:6], 16
+                )
+                try:
+                    repaired_data, suffix = generate_image(
+                        account_id, api_token, repair_prompt, image_model, repair_seed
+                    )
+                    replacement = path.with_suffix(suffix)
+                    temporary = replacement.with_name(
+                        replacement.stem + ".repairing" + suffix
+                    )
+                    temporary.write_bytes(repaired_data)
+                    temporary.replace(replacement)
+                    if replacement != path:
+                        path.unlink(missing_ok=True)
+                    path = replacement
+                    status = "regenerated"
+                except (OSError, RuntimeError) as exc:
+                    print(f"  Warning: {item_id} repair was skipped ({exc})")
+                    status = "kept_repair_failed"
+            else:
+                status = "passed" if passed else "kept_low_confidence"
+            manifest[item_id] = {
+                "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                "status": status,
+                "confidence": confidence,
+                "note": correction,
+            }
+        manifest_path.write_text(
+            json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+
+
 def select_script(script_argument: str | None) -> Path:
     """Resolve a supplied script path or prompt for one from scripts/."""
     if script_argument:
@@ -819,7 +1060,11 @@ def main() -> None:
         prompt = scene["prompt"]
         print(f"  Generating scene {index}/{len(scene_entries)}: {prompt[:70]}...")
         image_data, suffix = generate_image(
-            account_id, api_token, prompt, image_model, story_seed
+            account_id,
+            api_token,
+            prompt,
+            image_model,
+            story_seed + int(hashlib.sha256(image_stem.encode()).hexdigest()[:6], 16),
         )
         image_path = image_dir / f"{image_stem}{suffix}"
         temporary_path = image_dir / f"{image_stem}.generating{suffix}"
@@ -876,12 +1121,24 @@ def main() -> None:
             api_token,
             visual_plan["thumbnail_prompt"],
             image_model,
-            story_seed,
+            story_seed + int(hashlib.sha256(b"thumbnail").hexdigest()[:6], 16),
         )
         thumbnail_path = image_dir / f"{THUMBNAIL_STEM}{thumbnail_suffix}"
         temporary_path = image_dir / f"{THUMBNAIL_STEM}.generating{thumbnail_suffix}"
         temporary_path.write_bytes(thumbnail_data)
         temporary_path.replace(thumbnail_path)
+
+    print("Reviewing generated images for severe visual problems...")
+    review_and_repair_images(
+        image_dir=image_dir,
+        scenes=scene_entries,
+        thumbnail_prompt=visual_plan["thumbnail_prompt"],
+        gemini_api_key=gemini_api_key,
+        account_id=account_id,
+        api_token=api_token,
+        image_model=image_model,
+        story_seed=story_seed,
+    )
 
     print(f"\nAll images saved to {image_dir}")
     print(f"Total story beats: {len(scene_entries)}")

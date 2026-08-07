@@ -11,6 +11,7 @@ Usage:
 """
 
 import argparse
+import hashlib
 import json
 import re
 import shutil
@@ -108,7 +109,7 @@ def load_story_scenes(image_dir: Path, text: str) -> list[dict]:
         try:
             payload = json.loads(plan_path.read_text(encoding="utf-8"))
             scenes = payload.get("scenes")
-            if payload.get("version") in {2, 3} and isinstance(scenes, list) and scenes:
+            if payload.get("version") in {2, 3, 4} and isinstance(scenes, list) and scenes:
                 expected_start = 0
                 normalized = []
                 for index, scene in enumerate(scenes, start=1):
@@ -126,7 +127,7 @@ def load_story_scenes(image_dir: Path, text: str) -> list[dict]:
                     raise ValueError("dynamic scenes do not cover the full script")
                 return normalized
         except (KeyError, TypeError, ValueError, OSError, json.JSONDecodeError):
-            if payload.get("version") in {2, 3}:
+            if payload.get("version") in {2, 3, 4}:
                 raise SystemExit(
                     f"Dynamic scene plan is invalid: {plan_path}. "
                     "Regenerate the scene plan before assembling the video."
@@ -182,7 +183,7 @@ def load_scene_directions(image_dir: Path, scene_count: int) -> list[dict]:
         return default
     try:
         payload = json.loads(plan_path.read_text(encoding="utf-8"))
-        if payload.get("version") in {2, 3}:
+        if payload.get("version") in {2, 3, 4}:
             scenes = payload.get("scenes")
             if isinstance(scenes, list) and len(scenes) == scene_count:
                 return [
@@ -727,6 +728,113 @@ def render_thumbnail(
         temporary_output.unlink(missing_ok=True)
 
 
+def validate_rendered_video(
+    ffmpeg_path: str,
+    video_path: Path,
+    expected_duration: float,
+    caption_path: Path,
+    image_paths: list[Path],
+) -> dict:
+    """Reject technically broken output and report non-fatal creative warnings."""
+    ffprobe_path = shutil.which("ffprobe")
+    if not ffprobe_path:
+        raise RuntimeError("ffprobe is required to verify the finished video")
+    probe = subprocess.run(
+        [
+            ffprobe_path, "-v", "error", "-show_entries",
+            "format=duration:stream=codec_type,width,height", "-of", "json",
+            str(video_path),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    payload = json.loads(probe.stdout or "{}")
+    streams = payload.get("streams", [])
+    video_stream = next(
+        (stream for stream in streams if stream.get("codec_type") == "video"), None
+    )
+    audio_stream = next(
+        (stream for stream in streams if stream.get("codec_type") == "audio"), None
+    )
+    duration = float(payload.get("format", {}).get("duration", 0))
+    failures = []
+    warnings = []
+    if not video_stream:
+        failures.append("missing video stream")
+    if not audio_stream:
+        failures.append("missing audio stream")
+    if video_stream and (
+        int(video_stream.get("width", 0)) != VIDEO_WIDTH
+        or int(video_stream.get("height", 0)) != VIDEO_HEIGHT
+    ):
+        failures.append("incorrect video dimensions")
+    if abs(duration - expected_duration) > max(2.0, expected_duration * 0.02):
+        failures.append("video duration does not match narration")
+
+    media_check = subprocess.run(
+        [
+            ffmpeg_path, "-hide_banner", "-nostats", "-i", str(video_path),
+            "-vf", "blackdetect=d=2:pix_th=0.05",
+            "-af", "volumedetect", "-f", "null", "-",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    black_durations = [
+        float(value)
+        for value in re.findall(r"black_duration:([0-9.]+)", media_check.stderr)
+    ]
+    if any(value >= 2 for value in black_durations):
+        failures.append("long black video section detected")
+
+    mean_match = re.search(r"mean_volume:\s*(-?[0-9.]+) dB", media_check.stderr)
+    mean_volume = float(mean_match.group(1)) if mean_match else None
+    if mean_volume is None:
+        warnings.append("narration volume could not be measured")
+    elif mean_volume < -45:
+        failures.append("audio is effectively silent")
+
+    caption_text = caption_path.read_text(encoding="utf-8")
+    caption_ends = re.findall(
+        r"-->\s*(\d{2}):(\d{2}):(\d{2}),(\d{3})", caption_text
+    )
+    caption_end = 0.0
+    if caption_ends:
+        hours, minutes, seconds, milliseconds = map(int, caption_ends[-1])
+        caption_end = hours * 3600 + minutes * 60 + seconds + milliseconds / 1000
+    if abs(caption_end - expected_duration) > max(2.0, expected_duration * 0.02):
+        failures.append("captions do not reach the end of narration")
+
+    image_hashes = [
+        hashlib.sha256(path.read_bytes()).hexdigest() for path in image_paths
+    ]
+    distinct_images = len(set(image_hashes))
+    if len(image_hashes) >= 4 and distinct_images / len(image_hashes) < 0.4:
+        warnings.append("many timed scenes reuse the same image")
+
+    report = {
+        "passed": not failures,
+        "duration_seconds": round(duration, 3),
+        "expected_duration_seconds": round(expected_duration, 3),
+        "resolution": (
+            f"{video_stream.get('width')}x{video_stream.get('height')}"
+            if video_stream else "missing"
+        ),
+        "mean_volume_db": mean_volume,
+        "long_black_sections": black_durations,
+        "caption_end_seconds": round(caption_end, 3),
+        "timed_scenes": len(image_paths),
+        "distinct_images": distinct_images,
+        "warnings": warnings,
+        "failures": failures,
+    }
+    if failures:
+        raise RuntimeError("Finished-video quality check failed: " + "; ".join(failures))
+    return report
+
+
 def render_video(
     image_paths: list[Path],
     scene_durations: list[float],
@@ -867,8 +975,24 @@ def render_video(
                 "compatible scene changes."
             )
             render_attempt(False)
+        quality_report = validate_rendered_video(
+            ffmpeg_path,
+            temporary_output_path,
+            sum(scene_durations),
+            caption_path,
+            image_paths,
+        )
         temporary_output_path.replace(output_path)
         shutil.copy2(caption_path, output_path.with_suffix(".srt"))
+        output_path.with_suffix(".quality.json").write_text(
+            json.dumps(quality_report, indent=2) + "\n", encoding="utf-8"
+        )
+        print(
+            "Quality check passed: "
+            f"{quality_report['resolution']}, "
+            f"{quality_report['distinct_images']}/{quality_report['timed_scenes']} "
+            "distinct timed images."
+        )
     except subprocess.CalledProcessError as exc:
         raise SystemExit(f"ffmpeg failed with exit code {exc.returncode}.") from exc
     finally:
