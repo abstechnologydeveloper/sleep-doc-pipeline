@@ -284,6 +284,20 @@ def review_pipeline_stage(
 
     if stage in {"", "script_regenerate"}:
         if script_path is None:
+            if job.get("script_mode") == "provided":
+                provided_script = str(job.get("provided_script") or "").strip()
+                if len(provided_script.split()) < 50:
+                    raise RuntimeError("The pasted story is empty or too short.")
+                SCRIPTS_DIR.mkdir(parents=True, exist_ok=True)
+                script_path = (
+                    SCRIPTS_DIR
+                    / f"{time.strftime('%Y%m%d_%H%M%S')}_{safe_topic_slug(job['topic'])}_job{job['id']}.txt"
+                ).resolve()
+                script_path.write_text(provided_script + "\n", encoding="utf-8")
+                database.update_job(
+                    int(job["id"]), "processing", script_path=str(script_path)
+                )
+                return "script", None
             existing_scripts = set(SCRIPTS_DIR.glob("*.txt"))
             command = [
                 python, str(BASE_DIR / "generate_script.py"),
@@ -319,9 +333,12 @@ def review_pipeline_stage(
         run_stage_process(job, log_file, [*image_command, "--plan-only"])
         return "storyboard", None
     if stage == "storyboard_approved":
-        run_stage_process(job, log_file, image_command)
+        run_stage_process(job, log_file, [*image_command, "--scenes-only"])
         return "images", None
-    if stage == "images_approved":
+    if stage in {"thumbnail_generate", "thumbnail_regenerate"}:
+        run_stage_process(job, log_file, [*image_command, "--thumbnail-only"])
+        return "thumbnail", None
+    if stage in {"thumbnail_approved", "images_approved"}:
         run_stage_process(
             job,
             log_file,
@@ -339,6 +356,8 @@ def review_pipeline_stage(
             [python, str(BASE_DIR / "generate_sounds.py"), str(script_path)],
             optional=True,
         )
+        return "sounds", None
+    if stage == "sounds_approved":
         run_stage_process(
             job,
             log_file,
@@ -503,9 +522,14 @@ def process_job(job) -> None:
                             job, log_file, recent_script_paths
                         )
                         if next_review:
+                            metadata_source = video_path
+                            if metadata_source is None and job.get("script_path"):
+                                metadata_source = (
+                                    VIDEOS_DIR / f"{Path(str(job['script_path'])).stem}.mp4"
+                                )
                             review_metadata = (
-                                creative_metadata_for_video(video_path)
-                                if video_path else job.get("creative_metadata") or "{}"
+                                creative_metadata_for_video(metadata_source)
+                                if metadata_source else job.get("creative_metadata") or "{}"
                             )
                             database.update_job(
                                 job["id"],

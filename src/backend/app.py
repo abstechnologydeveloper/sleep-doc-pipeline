@@ -49,6 +49,7 @@ from .plans import (
     prompt_starters,
 )
 from .content_policy import validate_creator_content
+from pipeline.script import story_validation_issues, word_count
 
 
 WEB_DIR = Path(__file__).resolve().parents[1] / "web"
@@ -1394,14 +1395,32 @@ async def automatic_job(request: Request):
     try:
         verify_csrf(request, str(form.get("csrf", "")))
         topic = str(form.get("topic", "")).strip()
+        script_mode = str(form.get("script_mode", "ai")).strip()
+        provided_script = str(form.get("provided_script", "")).strip()
+        if script_mode not in {"ai", "provided"}:
+            raise ValueError("Invalid script choice")
+        if script_mode == "provided":
+            supplied_words = word_count(provided_script)
+            if supplied_words < 50:
+                raise ValueError("Paste at least 50 words for your complete story")
+            if len(provided_script) > 50_000:
+                raise ValueError("The pasted story is too long")
+            minutes = supplied_words / 150
+            if not topic:
+                topic = str(form.get("title", "")).strip() or provided_script[:240]
+        else:
+            provided_script = ""
+            minutes = float(str(form.get("minutes", "1")))
         search_keyword = str(form.get("search_keyword", "")).strip()
         if len(search_keyword) > 120:
             raise ValueError("Search phrase is too long")
-        minutes = float(str(form.get("minutes", "1")))
         scheduled_at = normalized_schedule(str(form.get("scheduled_at", "")))
         validate_creator_content(
-            topic, search_keyword, str(form.get("title", "")), str(form.get("description", ""))
+            topic, search_keyword,
+            str(form.get("title", "")), str(form.get("description", ""))
         )
+        for start in range(0, len(provided_script), 10_000):
+            validate_creator_content(provided_script[start:start + 10_000])
     except ValueError:
         return HTMLResponse("Invalid story request", status_code=400)
     if minutes < 0.5 or (
@@ -1423,6 +1442,7 @@ async def automatic_job(request: Request):
         title=str(form.get("title", "")).strip(),
         description=str(form.get("description", "")).strip(),
         hashtags=str(form.get("hashtags", "")), search_keyword=search_keyword,
+        script_mode=script_mode, provided_script=provided_script,
         platforms=selected_platforms(form),
         scheduled_at=scheduled_at,
         active_limit=MAX_ACTIVE_CREATOR_JOBS,
@@ -1634,11 +1654,16 @@ def job_detail(request: Request, job_id: int):
     review_audio_ready = False
     review_video_ready = False
     review_thumbnail_ready = False
+    review_script_issues = []
+    review_sounds = []
     script_path = Path(str(job.get("script_path") or ""))
     if job["kind"] == "automatic" and script_path.is_file():
         try:
             if SCRIPTS_DIR.resolve() in script_path.resolve().parents:
                 review_script = script_path.read_text(encoding="utf-8")
+                review_script_issues = story_validation_issues(
+                    review_script, str(job.get("topic") or "")
+                )
                 image_dir = IMAGES_DIR / script_path.stem
                 plan_path = image_dir / "scene_plan.json"
                 try:
@@ -1659,7 +1684,15 @@ def job_detail(request: Request, job_id: int):
                 review_thumbnail_ready = any(
                     (THUMBNAILS_DIR / f"{script_path.stem}{suffix}").is_file()
                     for suffix in (".jpg", ".jpeg", ".png")
+                ) or any(
+                    (image_dir / f"thumbnail_source{suffix}").is_file()
+                    for suffix in (".jpg", ".jpeg", ".png")
                 )
+                sound_dir = SOUNDS_DIR / script_path.stem
+                review_sounds = [
+                    path.name for path in sorted(sound_dir.glob("*.mp3"))
+                    if path.is_file()
+                ]
         except OSError:
             review_script = ""
     publication_items = []
@@ -1685,6 +1718,8 @@ def job_detail(request: Request, job_id: int):
             review_audio_ready=review_audio_ready,
             review_video_ready=review_video_ready,
             review_thumbnail_ready=review_thumbnail_ready,
+            review_script_issues=review_script_issues,
+            review_sounds=review_sounds,
             voice_options=VOICE_OPTIONS,
             voice_directions=VOICE_DIRECTIONS,
             feedback=database.get_job_feedback(job_id),
@@ -1768,6 +1803,10 @@ async def approve_job_review(request: Request, job_id: int):
         if len(script_text.split()) < 20:
             return HTMLResponse("Keep at least 20 words in the story.", status_code=400)
         script_path.write_text(script_text + "\n", encoding="utf-8")
+        if story_validation_issues(script_text, str(job.get("topic") or "")):
+            return RedirectResponse(
+                f"/jobs/{job_id}?review=needs_changes", status_code=303
+            )
     elif stage == "storyboard":
         plan_path = IMAGES_DIR / script_path.stem / "scene_plan.json"
         try:
@@ -1827,6 +1866,11 @@ async def regenerate_job_review(request: Request, job_id: int):
             (image_dir / f"thumbnail_source{suffix}").unlink(missing_ok=True)
             (THUMBNAILS_DIR / f"{stem}{suffix}").unlink(missing_ok=True)
         (image_dir / "image_review.json").unlink(missing_ok=True)
+    elif stage == "thumbnail":
+        image_dir = IMAGES_DIR / stem
+        for suffix in (".jpg", ".jpeg", ".png"):
+            (image_dir / f"thumbnail_source{suffix}").unlink(missing_ok=True)
+            (THUMBNAILS_DIR / f"{stem}{suffix}").unlink(missing_ok=True)
     elif stage == "audio":
         narration_voice = str(form.get("narration_voice", job["narration_voice"]))
         voice_direction = str(form.get("voice_direction", job["voice_direction"]))
@@ -1840,6 +1884,8 @@ async def regenerate_job_review(request: Request, job_id: int):
         )
         (AUDIO_DIR / f"{stem}.wav").unlink(missing_ok=True)
         (AUDIO_DIR / f"{stem}.timings.json").unlink(missing_ok=True)
+    elif stage == "sounds":
+        shutil.rmtree(SOUNDS_DIR / stem, ignore_errors=True)
     elif stage == "rough":
         for suffix in (".mp4", ".srt", ".quality.json"):
             (VIDEOS_DIR / f"{stem}{suffix}").unlink(missing_ok=True)
@@ -1910,7 +1956,21 @@ def job_review_asset(request: Request, job_id: int, asset: str):
     elif asset == "video":
         path, media_type = VIDEOS_DIR / f"{stem}.mp4", "video/mp4"
     elif asset == "thumbnail":
-        path, media_type = THUMBNAILS_DIR / f"{stem}.jpg", "image/jpeg"
+        final_thumbnail = THUMBNAILS_DIR / f"{stem}.jpg"
+        if final_thumbnail.is_file():
+            path, media_type = final_thumbnail, "image/jpeg"
+        else:
+            image_dir = IMAGES_DIR / stem
+            source = next(
+                (
+                    image_dir / f"thumbnail_source{suffix}"
+                    for suffix in (".jpg", ".jpeg", ".png")
+                    if (image_dir / f"thumbnail_source{suffix}").is_file()
+                ),
+                image_dir / "thumbnail_source.jpg",
+            )
+            path = source
+            media_type = "image/png" if source.suffix.lower() == ".png" else "image/jpeg"
     else:
         return HTMLResponse("Review file not available", status_code=404)
     if not path.is_file():
@@ -1937,6 +1997,25 @@ def job_review_image(request: Request, job_id: int, scene_id: str):
         if path.is_file():
             return FileResponse(path, media_type=media_type)
     return HTMLResponse("Image not available", status_code=404)
+
+
+@app.get("/jobs/{job_id}/review/sounds/{sound_name}")
+def job_review_sound(request: Request, job_id: int, sound_name: str):
+    redirect = login_required(request)
+    if redirect:
+        return redirect
+    job, _ = owned_job(request, job_id)
+    script_path = review_script_path(job) if job else None
+    if (
+        script_path is None
+        or Path(sound_name).name != sound_name
+        or not sound_name.endswith(".mp3")
+    ):
+        return HTMLResponse("Sound not available", status_code=404)
+    path = SOUNDS_DIR / script_path.stem / sound_name
+    if not path.is_file():
+        return HTMLResponse("Sound not available", status_code=404)
+    return FileResponse(path, media_type="audio/mpeg")
 
 
 @app.post("/jobs/{job_id}/publish")
