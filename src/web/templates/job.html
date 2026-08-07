@@ -9,6 +9,45 @@
 
 {% if job.error %}<div class="alert error"><strong>We could not finish this video.</strong><span>{{ job.error if is_admin else job_error_message }}</span></div>{% endif %}
 {% if is_admin and job.status == 'failed' %}<details class="panel job-log"><summary>Show failure diagnostics</summary><pre>{{ admin_job_log }}</pre></details>{% endif %}
+{% if request.query_params.get('review') == 'approved' %}<div class="alert success">Approved. We are preparing the next step.</div>{% elif request.query_params.get('review') == 'regenerating' %}<div class="alert success">Your changes were saved. We are remaking that step.</div>{% endif %}
+
+{% if job.status == 'awaiting_review' and review_stage %}
+<section class="panel review-workspace">
+  <div class="section-heading"><div><p class="eyebrow">Your approval is needed</p><h2>{% if review_stage == 'script' %}Read the story{% elif review_stage == 'storyboard' %}Match each scene{% elif review_stage == 'images' %}Check every picture{% elif review_stage == 'audio' %}Listen to the voice{% elif review_stage == 'rough' %}Watch the complete draft{% endif %}</h2><p>Nothing moves to the next step until you approve it.</p></div><span class="status status-awaiting_review">Review now</span></div>
+
+  {% if review_stage == 'script' %}
+  <form method="post" action="/jobs/{{ job.id }}/review/approve" class="studio-form">
+    <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="stage" value="script">
+    <label>Story text<textarea name="script_text" class="review-script" required>{{ review_script }}</textarea><span>Edit names, words, facts, or story events before pictures are planned.</span></label>
+    <div class="action-row"><button class="button primary" type="submit">Approve story and plan scenes</button></div>
+  </form>
+  {% elif review_stage == 'storyboard' %}
+  <form method="post" action="/jobs/{{ job.id }}/review/approve" class="studio-form">
+    <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="stage" value="storyboard">
+    <div class="review-scene-list">
+    {% for scene in review_scenes %}<article class="review-scene"><header><strong>Scene {{ loop.index }}</strong><span>{{ scene.beat or 'Story moment' }}</span></header><p>{{ scene.narration }}</p><label>Picture instructions<textarea name="prompt_{{ scene.id }}" required>{{ scene.prompt }}</textarea></label></article>{% else %}<div class="empty-panel">The storyboard could not be loaded.</div>{% endfor %}
+    </div>
+    {% if review_scenes %}<button class="button primary" type="submit">Approve scenes and make pictures</button>{% endif %}
+  </form>
+  {% elif review_stage == 'images' %}
+  <div class="review-image-grid">
+  {% for scene in review_scenes %}<article class="review-image-card"><div class="review-image-frame">{% if scene.reuse_scene_id %}<span>Uses {{ scene.reuse_scene_id|replace('_', ' ') }}</span>{% elif scene.image_ready %}<img src="/jobs/{{ job.id }}/review/images/{{ scene.id }}" alt="Scene {{ loop.index }} review image" loading="lazy">{% else %}<span>Picture unavailable</span>{% endif %}</div><div><strong>Scene {{ loop.index }}</strong><p>{{ scene.narration }}</p>{% if not scene.reuse_scene_id %}<form method="post" action="/jobs/{{ job.id }}/review/images/{{ scene.id }}/regenerate" class="studio-form"><input type="hidden" name="csrf" value="{{ csrf }}"><label>Picture instructions<textarea name="prompt" required>{{ scene.prompt }}</textarea></label><button class="button secondary" type="submit">Remake only this picture</button></form>{% endif %}</div></article>{% endfor %}
+  </div>
+  <form method="post" action="/jobs/{{ job.id }}/review/approve" class="action-row"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="stage" value="images"><button class="button primary" type="submit">Approve all pictures and make voice</button></form>
+  {% elif review_stage == 'audio' %}
+  {% if review_audio_ready %}<audio class="review-audio" controls preload="metadata" src="/jobs/{{ job.id }}/review/audio"></audio>{% else %}<div class="empty-panel">The narration preview is unavailable.</div>{% endif %}
+  <p>Listen for the voice, speed, pronunciation, missing words, and awkward pauses.</p>
+  <form method="post" action="/jobs/{{ job.id }}/review/approve" class="action-row"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="stage" value="audio"><button class="button primary" type="submit">Approve voice and build video</button></form>
+  {% elif review_stage == 'rough' %}
+  {% if review_video_ready %}<video class="video-player" controls preload="metadata" src="/jobs/{{ job.id }}/review/video"></video>{% endif %}
+  {% if review_thumbnail_ready %}<div class="rough-thumbnail"><strong>Thumbnail</strong><img src="/jobs/{{ job.id }}/review/thumbnail" alt="Generated video thumbnail"></div>{% endif %}
+  <p>Check the story-to-picture match, movement, captions, voice, sound, transitions, and thumbnail.</p>
+  <form method="post" action="/jobs/{{ job.id }}/review/approve" class="action-row"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="stage" value="rough"><button class="button primary" type="submit">Approve final video</button></form>
+  {% endif %}
+
+  <form method="post" action="/jobs/{{ job.id }}/review/regenerate" class="review-reject studio-form"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="stage" value="{{ review_stage }}">{% if review_stage == 'audio' %}<div class="field-row"><label>Try another narrator<select name="narration_voice">{% for key, label in voice_options.items() %}<option value="{{ key }}" {{ 'selected' if job.narration_voice == key else '' }}>{{ label }}</option>{% endfor %}</select></label><label>Voice style<select name="voice_direction">{% for key, label in voice_directions.items() %}<option value="{{ key }}" {{ 'selected' if job.voice_direction == key else '' }}>{{ label }}</option>{% endfor %}</select></label></div>{% endif %}<button class="button secondary" type="submit">{% if review_stage == 'audio' %}Make another voice preview{% else %}Remake this whole step{% endif %}</button></form>
+</section>
+{% endif %}
 
 <div class="content-grid job-layout">
   <section class="panel span-two">
@@ -29,8 +68,9 @@
         {% endif %}
       </div>
       {% endif %}
-    {% else %}
+    {% elif job.status != 'awaiting_review' %}
       <div class="processing-state"><span class="spinner"></span><strong>{{ job.status|friendly_status }}</strong><p>You can leave this page. It will update automatically.</p></div>
+    {% else %}<div class="empty-panel">Review the current step above to continue.</div>
     {% endif %}
   </section>
   <aside class="panel">
@@ -109,7 +149,7 @@
   <aside class="panel danger-panel">
     <div class="section-heading"><div><h2>Job actions</h2><p>Retry failures or remove work you no longer need.</p></div></div>
     {% if job.status in ['failed','waiting_for_connections'] %}<form method="post" action="/jobs/{{ job.id }}/retry"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="button secondary" type="submit">Retry job</button></form>{% endif %}
-    <form method="post" action="/jobs/{{ job.id }}/delete" onsubmit="return confirm('Delete this video? Work in progress will be stopped.')"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="button danger" type="submit">{{ 'Stop and delete video' if job.status in ['processing','publishing','cancel_requested'] else 'Delete video' }}</button></form>
+    <form method="post" action="/jobs/{{ job.id }}/delete" onsubmit="return confirm('Delete this video? Work in progress will be stopped.')"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="button danger" type="submit">{{ 'Stop and delete video' if job.status in ['processing','awaiting_review','publishing','cancel_requested'] else 'Delete video' }}</button></form>
   </aside>
 </div>
 {% endblock %}

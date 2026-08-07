@@ -3,6 +3,7 @@ import hmac
 import json
 import os
 import secrets
+import shutil
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -14,7 +15,10 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
-from project_paths import DATA_DIR, THUMBNAILS_DIR
+from project_paths import (
+    AUDIO_DIR, DATA_DIR, IMAGES_DIR, SCRIPTS_DIR, SOUNDS_DIR, THUMBNAILS_DIR,
+    VIDEOS_DIR,
+)
 
 from . import database
 from . import storage
@@ -53,6 +57,7 @@ MAX_SESSION_ACCOUNTS = 20
 FRIENDLY_STATUSES = {
     "queued": "Waiting to start",
     "processing": "Creating your video",
+    "awaiting_review": "Waiting for your review",
     "publishing": "Sending to channel",
     "completed": "Ready to watch",
     "published": "Published",
@@ -73,6 +78,7 @@ TEMPLATES.env.filters["storage_size"] = lambda value: (
 JOB_STATUSES = (
     "queued",
     "processing",
+    "awaiting_review",
     "publishing",
     "completed",
     "published",
@@ -560,7 +566,7 @@ async def job_updates(websocket: WebSocket):
                         "total": sum(counts.values()),
                         "active": sum(
                             counts.get(status, 0)
-                            for status in ("queued", "processing", "publishing")
+                            for status in ("queued", "processing", "awaiting_review", "publishing")
                         ),
                         "ready": sum(
                             counts.get(status, 0)
@@ -790,7 +796,7 @@ def dashboard(request: Request):
     counts = database.job_status_counts(user_id, include_all)
     summary = {
         "total": sum(counts.values()),
-        "active": sum(counts.get(status, 0) for status in ("queued", "processing", "publishing")),
+        "active": sum(counts.get(status, 0) for status in ("queued", "processing", "awaiting_review", "publishing")),
         "failed": counts.get("failed", 0),
         "ready": sum(
             counts.get(status, 0)
@@ -1622,6 +1628,40 @@ def job_detail(request: Request, job_id: int):
             creative_metadata = {}
     except (TypeError, ValueError, json.JSONDecodeError):
         creative_metadata = {}
+    review_stage = str(job.get("review_stage") or "")
+    review_script = ""
+    review_scenes = []
+    review_audio_ready = False
+    review_video_ready = False
+    review_thumbnail_ready = False
+    script_path = Path(str(job.get("script_path") or ""))
+    if job["kind"] == "automatic" and script_path.is_file():
+        try:
+            if SCRIPTS_DIR.resolve() in script_path.resolve().parents:
+                review_script = script_path.read_text(encoding="utf-8")
+                image_dir = IMAGES_DIR / script_path.stem
+                plan_path = image_dir / "scene_plan.json"
+                try:
+                    plan = json.loads(plan_path.read_text(encoding="utf-8"))
+                except (OSError, ValueError, json.JSONDecodeError):
+                    plan = {}
+                for scene in plan.get("scenes", []) if isinstance(plan, dict) else []:
+                    if not isinstance(scene, dict):
+                        continue
+                    scene_id = str(scene.get("id", ""))
+                    image_ready = any(
+                        (image_dir / f"{scene_id}{suffix}").is_file()
+                        for suffix in (".jpg", ".jpeg", ".png")
+                    )
+                    review_scenes.append({**scene, "image_ready": image_ready})
+                review_audio_ready = (AUDIO_DIR / f"{script_path.stem}.wav").is_file()
+                review_video_ready = (VIDEOS_DIR / f"{script_path.stem}.mp4").is_file()
+                review_thumbnail_ready = any(
+                    (THUMBNAILS_DIR / f"{script_path.stem}{suffix}").is_file()
+                    for suffix in (".jpg", ".jpeg", ".png")
+                )
+        except OSError:
+            review_script = ""
     publication_items = []
     for publication in publications:
         item = dict(publication)
@@ -1639,6 +1679,14 @@ def job_detail(request: Request, job_id: int):
             job=job,
             publications=publication_items,
             creative_metadata=creative_metadata,
+            review_stage=review_stage,
+            review_script=review_script,
+            review_scenes=review_scenes,
+            review_audio_ready=review_audio_ready,
+            review_video_ready=review_video_ready,
+            review_thumbnail_ready=review_thumbnail_ready,
+            voice_options=VOICE_OPTIONS,
+            voice_directions=VOICE_DIRECTIONS,
             feedback=database.get_job_feedback(job_id),
             job_error_message=creator_job_error(job["error"]),
             admin_job_log=(
@@ -1662,6 +1710,233 @@ def job_detail(request: Request, job_id: int):
             ),
         ),
     )
+
+
+def review_script_path(job) -> Path | None:
+    candidate = Path(str(job.get("script_path") or ""))
+    try:
+        resolved = candidate.resolve()
+    except OSError:
+        return None
+    return (
+        resolved
+        if resolved.is_file() and SCRIPTS_DIR.resolve() in resolved.parents
+        else None
+    )
+
+
+def cleanup_local_review_files(job) -> None:
+    """Remove mounted intermediate media after a paused or failed job is deleted."""
+    script_path = review_script_path(job)
+    if script_path is None:
+        return
+    stem = script_path.stem
+    for path in (
+        script_path,
+        script_path.with_suffix(".research.md"),
+        script_path.with_suffix(".fact-check.md"),
+        AUDIO_DIR / f"{stem}.wav",
+        AUDIO_DIR / f"{stem}.timings.json",
+        VIDEOS_DIR / f"{stem}.mp4",
+        VIDEOS_DIR / f"{stem}.srt",
+        VIDEOS_DIR / f"{stem}.quality.json",
+        THUMBNAILS_DIR / f"{stem}.jpg",
+    ):
+        path.unlink(missing_ok=True)
+    shutil.rmtree(IMAGES_DIR / stem, ignore_errors=True)
+    shutil.rmtree(SOUNDS_DIR / stem, ignore_errors=True)
+
+
+@app.post("/jobs/{job_id}/review/approve")
+async def approve_job_review(request: Request, job_id: int):
+    redirect = creator_required(request)
+    if redirect:
+        return redirect
+    form = await request.form()
+    verify_csrf(request, str(form.get("csrf", "")))
+    job, _ = owned_job(request, job_id)
+    if not job or job["status"] != "awaiting_review":
+        return HTMLResponse("This review is no longer waiting.", status_code=409)
+    stage = str(form.get("stage", ""))
+    if stage != str(job.get("review_stage") or ""):
+        return HTMLResponse("This review step has already changed.", status_code=409)
+    script_path = review_script_path(job)
+    if script_path is None:
+        return HTMLResponse("The saved script is unavailable.", status_code=409)
+    if stage == "script":
+        script_text = str(form.get("script_text", "")).strip()
+        if len(script_text.split()) < 20:
+            return HTMLResponse("Keep at least 20 words in the story.", status_code=400)
+        script_path.write_text(script_text + "\n", encoding="utf-8")
+    elif stage == "storyboard":
+        plan_path = IMAGES_DIR / script_path.stem / "scene_plan.json"
+        try:
+            plan = json.loads(plan_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, json.JSONDecodeError):
+            return HTMLResponse("The storyboard is unavailable.", status_code=409)
+        scenes = plan.get("scenes", []) if isinstance(plan, dict) else []
+        for scene in scenes:
+            if not isinstance(scene, dict):
+                continue
+            field = f"prompt_{scene.get('id', '')}"
+            edited_prompt = str(form.get(field, "")).strip()
+            if edited_prompt:
+                scene["prompt"] = edited_prompt[:2400]
+        plan_path.write_text(
+            json.dumps(plan, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+    if not database.continue_review(
+        job_id, int(current_user(request)["id"]), stage
+    ):
+        return HTMLResponse("This review step has already changed.", status_code=409)
+    return RedirectResponse(f"/jobs/{job_id}?review=approved", status_code=303)
+
+
+@app.post("/jobs/{job_id}/review/regenerate")
+async def regenerate_job_review(request: Request, job_id: int):
+    redirect = creator_required(request)
+    if redirect:
+        return redirect
+    form = await request.form()
+    verify_csrf(request, str(form.get("csrf", "")))
+    job, _ = owned_job(request, job_id)
+    stage = str(form.get("stage", ""))
+    if (
+        not job
+        or job["status"] != "awaiting_review"
+        or stage != str(job.get("review_stage") or "")
+    ):
+        return HTMLResponse("This review is no longer waiting.", status_code=409)
+    script_path = review_script_path(job)
+    if script_path is None:
+        return HTMLResponse("The saved script is unavailable.", status_code=409)
+    stem = script_path.stem
+    if stage == "script":
+        script_path.unlink(missing_ok=True)
+        for suffix in (".research.md", ".fact-check.md"):
+            script_path.with_suffix(suffix).unlink(missing_ok=True)
+    elif stage == "storyboard":
+        (IMAGES_DIR / stem / "scene_plan.json").unlink(missing_ok=True)
+    elif stage == "images":
+        image_dir = IMAGES_DIR / stem
+        for path in image_dir.glob("scene_*.*"):
+            if path.is_file():
+                path.unlink(missing_ok=True)
+        for suffix in (".jpg", ".jpeg", ".png"):
+            (image_dir / f"thumbnail_source{suffix}").unlink(missing_ok=True)
+            (THUMBNAILS_DIR / f"{stem}{suffix}").unlink(missing_ok=True)
+        (image_dir / "image_review.json").unlink(missing_ok=True)
+    elif stage == "audio":
+        narration_voice = str(form.get("narration_voice", job["narration_voice"]))
+        voice_direction = str(form.get("voice_direction", job["voice_direction"]))
+        if narration_voice not in VOICE_OPTIONS or voice_direction not in VOICE_DIRECTIONS:
+            return HTMLResponse("Choose a valid narrator and voice style.", status_code=400)
+        database.update_job(
+            job_id,
+            "awaiting_review",
+            narration_voice=narration_voice,
+            voice_direction=voice_direction,
+        )
+        (AUDIO_DIR / f"{stem}.wav").unlink(missing_ok=True)
+        (AUDIO_DIR / f"{stem}.timings.json").unlink(missing_ok=True)
+    elif stage == "rough":
+        for suffix in (".mp4", ".srt", ".quality.json"):
+            (VIDEOS_DIR / f"{stem}{suffix}").unlink(missing_ok=True)
+    if not database.restart_review_stage(
+        job_id, int(current_user(request)["id"]), stage
+    ):
+        return HTMLResponse("This review step has already changed.", status_code=409)
+    return RedirectResponse(f"/jobs/{job_id}?review=regenerating", status_code=303)
+
+
+@app.post("/jobs/{job_id}/review/images/{scene_id}/regenerate")
+async def regenerate_review_image(request: Request, job_id: int, scene_id: str):
+    redirect = creator_required(request)
+    if redirect:
+        return redirect
+    form = await request.form()
+    verify_csrf(request, str(form.get("csrf", "")))
+    job, _ = owned_job(request, job_id)
+    if not job or job["status"] != "awaiting_review" or job["review_stage"] != "images":
+        return HTMLResponse("Image review is no longer waiting.", status_code=409)
+    if not scene_id.startswith("scene_") or not scene_id[6:].isdigit():
+        return HTMLResponse("Invalid scene", status_code=400)
+    script_path = review_script_path(job)
+    if script_path is None:
+        return HTMLResponse("The saved script is unavailable.", status_code=409)
+    image_dir = IMAGES_DIR / script_path.stem
+    plan_path = image_dir / "scene_plan.json"
+    try:
+        plan = json.loads(plan_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, json.JSONDecodeError):
+        return HTMLResponse("The storyboard is unavailable.", status_code=409)
+    selected = next(
+        (
+            scene for scene in plan.get("scenes", [])
+            if isinstance(scene, dict) and scene.get("id") == scene_id
+        ),
+        None,
+    )
+    if selected is None:
+        return HTMLResponse("Scene not found", status_code=404)
+    edited_prompt = str(form.get("prompt", "")).strip()
+    if edited_prompt:
+        selected["prompt"] = edited_prompt[:2400]
+    plan_path.write_text(
+        json.dumps(plan, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
+    for suffix in (".jpg", ".jpeg", ".png"):
+        (image_dir / f"{scene_id}{suffix}").unlink(missing_ok=True)
+    if not database.restart_review_stage(
+        job_id, int(current_user(request)["id"]), "images"
+    ):
+        return HTMLResponse("Image review has already changed.", status_code=409)
+    return RedirectResponse(f"/jobs/{job_id}?review=regenerating", status_code=303)
+
+
+@app.get("/jobs/{job_id}/review/{asset}")
+def job_review_asset(request: Request, job_id: int, asset: str):
+    redirect = login_required(request)
+    if redirect:
+        return redirect
+    job, _ = owned_job(request, job_id)
+    script_path = review_script_path(job) if job else None
+    if script_path is None:
+        return HTMLResponse("Review file not available", status_code=404)
+    stem = script_path.stem
+    if asset == "audio":
+        path, media_type = AUDIO_DIR / f"{stem}.wav", "audio/wav"
+    elif asset == "video":
+        path, media_type = VIDEOS_DIR / f"{stem}.mp4", "video/mp4"
+    elif asset == "thumbnail":
+        path, media_type = THUMBNAILS_DIR / f"{stem}.jpg", "image/jpeg"
+    else:
+        return HTMLResponse("Review file not available", status_code=404)
+    if not path.is_file():
+        return HTMLResponse("Review file not available", status_code=404)
+    return FileResponse(path, media_type=media_type)
+
+
+@app.get("/jobs/{job_id}/review/images/{scene_id}")
+def job_review_image(request: Request, job_id: int, scene_id: str):
+    redirect = login_required(request)
+    if redirect:
+        return redirect
+    job, _ = owned_job(request, job_id)
+    script_path = review_script_path(job) if job else None
+    if (
+        script_path is None
+        or not scene_id.startswith("scene_")
+        or not scene_id[6:].isdigit()
+    ):
+        return HTMLResponse("Image not available", status_code=404)
+    image_dir = IMAGES_DIR / script_path.stem
+    for suffix, media_type in ((".jpg", "image/jpeg"), (".jpeg", "image/jpeg"), (".png", "image/png")):
+        path = image_dir / f"{scene_id}{suffix}"
+        if path.is_file():
+            return FileResponse(path, media_type=media_type)
+    return HTMLResponse("Image not available", status_code=404)
 
 
 @app.post("/jobs/{job_id}/publish")
@@ -2160,6 +2435,8 @@ def delete_job(
     if not job:
         return HTMLResponse("Job not found", status_code=404)
     media_references = (job["video_path"], job["source_path"])
+    if job["status"] in {"awaiting_review", "failed"}:
+        cleanup_local_review_files(job)
     database.request_job_deletion(job_id)
     delete_unreferenced_media(*media_references)
     safe_return = return_to if return_to in {"/app", "/storytelling", "/jobs"} else "/jobs"
@@ -2184,6 +2461,8 @@ async def delete_selected_jobs(request: Request):
         if job_id > 0 and job:
             job_ids.append(job_id)
             media_references.extend((job["video_path"], job["source_path"]))
+            if job["status"] in {"awaiting_review", "failed"}:
+                cleanup_local_review_files(job)
     database.request_jobs_deletion(job_ids)
     delete_unreferenced_media(*media_references)
     return_to = str(form.get("return_to", "/jobs"))

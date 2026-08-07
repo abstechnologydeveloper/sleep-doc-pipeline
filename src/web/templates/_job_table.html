@@ -22,7 +22,7 @@
         <td><span class="status status-{{ job.status }}" data-job-status>{{ job.status|friendly_status }}</span></td>
         <td class="muted">{{ job.created_at[:16]|replace('T', ' ') }}</td>
         <td class="row-actions">
-          <button class="row-delete" type="submit" formaction="/jobs/{{ job.id }}/delete" onclick="return confirm('{{ 'Cancel and delete this running job?' if job.status in ['processing','publishing','cancel_requested'] else 'Delete this job?' }}')">{{ 'Cancel' if job.status in ['processing','publishing','cancel_requested'] else 'Delete' }}</button>
+          <button class="row-delete" type="submit" formaction="/jobs/{{ job.id }}/delete" onclick="return confirm('{{ 'Cancel and delete this unfinished job?' if job.status in ['processing','awaiting_review','publishing','cancel_requested'] else 'Delete this job?' }}')">{{ 'Cancel' if job.status in ['processing','awaiting_review','publishing','cancel_requested'] else 'Delete' }}</button>
         </td>
       </tr>
     {% else %}

@@ -41,15 +41,10 @@ STYLE_SUFFIX = (
     "clear focal subject, layered foreground and background depth, intentional lighting, "
     "native cinematic 16:9 composition, no text, no watermark, no logo, high detail"
 )
-SAFETY_FALLBACK_PROMPT = (
-    "A peaceful empty landscape beneath a starlit night sky, gentle moonlight, "
-    "quiet trees and distant hills, calm atmospheric lighting, soft muted colors, "
-    "cinematic wide shot, no people, no text, no watermark, high detail"
-)
 SCENE_PLAN_FILENAME = "scene_plan.json"
 IMAGE_REVIEW_FILENAME = "image_review.json"
 THUMBNAIL_STEM = "thumbnail_source"
-PLAN_VERSION = 4
+PLAN_VERSION = 5
 
 
 class ImageBudgetExceeded(RuntimeError):
@@ -132,7 +127,7 @@ def materialize_scenes(raw_scenes: object, segments: list[dict]) -> list[dict]:
                 "location": str(raw.get("location", "")).strip(),
                 "importance": str(raw.get("importance", "mandatory")).strip(),
                 "reuse_scene_id": reuse_scene_id,
-                "prompt": f"{prompt[:1750]}{STYLE_SUFFIX}",
+                "prompt": prompt[:900],
                 "direction": {
                     "camera": direction.get("camera", "slow_push"),
                     "transition": direction.get("transition", "fade"),
@@ -151,6 +146,96 @@ def materialize_scenes(raw_scenes: object, segments: list[dict]) -> list[dict]:
         if reused and (reused not in known_ids or reused >= scene["id"]):
             raise ValueError("A reused visual must reference an earlier scene")
     return scenes
+
+
+def compile_scene_prompts(
+    scenes: list[dict], continuity: object, project_profile: object
+) -> None:
+    """Build one concise, story-specific image contract for each scene."""
+    if not isinstance(continuity, dict):
+        continuity = {}
+    if not isinstance(project_profile, dict):
+        project_profile = {}
+    raw_characters = continuity.get("characters", [])
+    raw_locations = continuity.get("locations", [])
+    character_registry = {}
+    for character in raw_characters if isinstance(raw_characters, list) else []:
+        if not isinstance(character, dict):
+            continue
+        character_id = str(character.get("id", "")).strip()
+        canonical = str(
+            character.get("canonical_description")
+            or character.get("description")
+            or ""
+        ).strip()
+        if character_id and canonical:
+            character_registry[character_id] = canonical
+    location_registry = {}
+    for location in raw_locations if isinstance(raw_locations, list) else []:
+        if not isinstance(location, dict):
+            continue
+        location_id = str(location.get("id", "")).strip()
+        description = str(
+            location.get("canonical_description")
+            or location.get("description")
+            or ""
+        ).strip()
+        if location_id and description:
+            location_registry[location_id] = description
+
+    for scene in scenes:
+        character_ids = scene.get("characters", [])
+        if not isinstance(character_ids, list):
+            character_ids = []
+        identities = [
+            character_registry[character_id]
+            for raw_id in character_ids
+            if (character_id := str(raw_id).strip()) in character_registry
+        ]
+        location = location_registry.get(str(scene.get("location", "")).strip(), "")
+        action = str(scene.get("action", "")).strip()
+        shot = str(scene.get("prompt", "")).strip()
+        if not action:
+            action = str(scene.get("narration", "")).strip()[:350]
+        parts = []
+        medium = str(project_profile.get("visual_medium", "")).strip()
+        if medium:
+            parts.append(f"Medium: {medium}")
+        if identities:
+            parts.append(f"Characters: {' | '.join(identities)}")
+        narration = str(scene.get("narration", "")).strip()
+        if narration:
+            parts.append(f"Exact story moment: {narration[:500]}")
+        parts.append(f"Visible action: {action[:450]}")
+        if location:
+            parts.append(f"Location: {location[:400]}")
+        if shot:
+            parts.append(f"Composition: {shot[:550]}")
+        palette = str(project_profile.get("palette", "")).strip()
+        if palette:
+            parts.append(f"Color palette: {palette[:180]}")
+        parts.append("Native 16:9 frame. No text, logo, watermark, collage, or border")
+        scene["prompt"] = ". ".join(parts) + "."
+
+
+def family_safe_prompt(prompt: str) -> str:
+    """Make a rejected prompt non-graphic without discarding its story subject."""
+    replacements = {
+        r"\bblood(?:y)?\b": "signs of danger",
+        r"\bgore\b": "dramatic tension",
+        r"\bcorpse\b": "fallen figure shown without injury",
+        r"\bdead body\b": "still figure shown without injury",
+        r"\bnud(?:e|ity)\b": "fully clothed",
+        r"\bgraphic injury\b": "non-graphic danger",
+    }
+    sanitized = prompt
+    for pattern, replacement in replacements.items():
+        sanitized = re.sub(pattern, replacement, sanitized, flags=re.IGNORECASE)
+    return (
+        "Family-safe, fully clothed, non-graphic storytelling scene. Preserve the exact "
+        "characters, literal species, action, location, period, and composition. "
+        f"{sanitized}"
+    )
 
 
 def split_into_scenes(text: str, words_per_scene: int = WORDS_PER_SCENE) -> list[str]:
@@ -366,7 +451,11 @@ Create continuity registries for every recurring character, location, and import
 Give every recurring character one immutable canonical_description containing their face,
 age, body shape, skin tone, hair, clothing, and fixed colors. Copy that exact description
 word-for-word into every scene prompt where the character appears; never shorten, paraphrase,
-or replace it. Lock architecture, geography, weather, lighting direction, and palette in the
+or replace it. An explicitly named species or non-human character type is binding. Begin its
+canonical description and every relevant scene prompt with that literal species or type.
+Never turn it into a human because it wears clothes, speaks, drives, works, or shows human-like
+emotion. Do not add background humans to an all-animal or all-object world. Lock architecture,
+geography, weather, lighting direction, and palette in the
 same way for recurring locations. Each prompt must describe visible action, expression,
 setting, camera distance, composition, and lighting without changing locked details.
 Generate native cinematic 16:9 compositions with important subjects in a central safe area,
@@ -452,6 +541,11 @@ Return JSON only with:
         )
         raw_plan = json.loads(response.text or "")
         scenes = materialize_scenes(raw_plan.get("scenes"), segments)
+        compile_scene_prompts(
+            scenes,
+            raw_plan.get("continuity", {}),
+            raw_plan.get("project_profile", {}),
+        )
         distinct_scene_count = cap_distinct_scenes(scenes, max_images)
         thumbnail_candidates = []
         for candidate in raw_plan.get("thumbnail_candidates", [])[:3]:
@@ -732,9 +826,9 @@ def generate_image(
                     "Retry after the daily reset or enable Workers Paid."
                 ) from exc
             if exc.code == 400 and "NSFW content" in details and not used_safety_fallback:
-                active_prompt = SAFETY_FALLBACK_PROMPT
+                active_prompt = family_safe_prompt(prompt)
                 used_safety_fallback = True
-                print("    Cloudflare rejected the scene prompt; retrying with a neutral visual.")
+                print("    Cloudflare rejected the scene prompt; retrying a family-safe version.")
                 continue
             if exc.code not in {408, 409, 429, 500, 502, 503, 504}:
                 raise RuntimeError(
@@ -771,7 +865,9 @@ def review_image_batch(
     parts = [types.Part(text=(
         "Review these generated storytelling images against their expected prompts. "
         "Fail only for a severe visible problem: blank or nearly black output, unrelated "
-        "subject, accidental text or logo, badly broken anatomy, missing main subject, or "
+        "subject, wrong species or character type, a non-human character replaced by a "
+        "human, wrong story action or location, accidental text or logo, badly broken "
+        "anatomy, missing main subject, or "
         "framing that hides the important action. Style preference alone is not a failure. "
         "Return JSON only with a reviews array. Each review needs id, passed, confidence "
         "from 0 to 1, and one short correction."
@@ -955,6 +1051,11 @@ def main() -> None:
     )
     parser.add_argument("--niche", default="", help="Creator's saved channel niche")
     parser.add_argument("--audience", default="", help="Creator's saved target audience")
+    parser.add_argument(
+        "--plan-only",
+        action="store_true",
+        help="Save the storyboard for human review without generating images",
+    )
     args = parser.parse_args()
 
     script_path = select_script(args.script_path)
@@ -1013,6 +1114,9 @@ def main() -> None:
         args.niche,
         args.audience,
     )
+    if args.plan_only:
+        print(f"Storyboard ready for review: {plan_path}")
+        return
 
     if visual_plan.get("version") == PLAN_VERSION:
         scene_entries = visual_plan["scenes"]

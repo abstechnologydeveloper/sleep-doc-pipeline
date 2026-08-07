@@ -107,6 +107,7 @@ def initialize() -> None:
                 log_path TEXT,
                 error TEXT,
                 creative_metadata TEXT NOT NULL DEFAULT '{}',
+                review_stage TEXT NOT NULL DEFAULT '',
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
@@ -246,6 +247,7 @@ def initialize() -> None:
             ALTER TABLE jobs ADD COLUMN IF NOT EXISTS search_keyword TEXT NOT NULL DEFAULT '';
             ALTER TABLE jobs ADD COLUMN IF NOT EXISTS youtube_privacy TEXT NOT NULL DEFAULT 'private';
             ALTER TABLE jobs ADD COLUMN IF NOT EXISTS creative_metadata TEXT NOT NULL DEFAULT '{}';
+            ALTER TABLE jobs ADD COLUMN IF NOT EXISTS review_stage TEXT NOT NULL DEFAULT '';
             ALTER TABLE jobs ALTER COLUMN youtube_privacy SET DEFAULT 'public';
             ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS paystack_customer_code TEXT NOT NULL DEFAULT '';
             ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS payment_reference TEXT NOT NULL DEFAULT '';
@@ -580,7 +582,7 @@ def queue_story_publication(
             (job_id, owner_id),
         ).fetchone()
         if not job or job["status"] in {
-            "queued", "processing", "publishing", "cancel_requested"
+            "queued", "processing", "awaiting_review", "publishing", "cancel_requested"
         }:
             return False
         db.execute(
@@ -648,7 +650,7 @@ def create_story_job(
                 return None, "Your monthly story limit has been reached."
             active_jobs = db.execute(
                 """SELECT COUNT(*) AS total FROM jobs WHERE owner_id = ?
-                AND status IN ('queued', 'processing', 'publishing')""",
+                AND status IN ('queued', 'processing', 'awaiting_review', 'publishing')""",
                 (owner_id,),
             ).fetchone()["total"]
             if active_jobs >= active_limit:
@@ -1089,7 +1091,7 @@ def active_job_count(user_id: int) -> int:
     with connect() as db:
         return int(db.execute(
             """SELECT COUNT(*) AS total FROM jobs WHERE owner_id=?
-            AND status IN ('queued','processing','publishing')""",
+            AND status IN ('queued','processing','awaiting_review','publishing')""",
             (user_id,),
         ).fetchone()["total"])
 
@@ -1107,7 +1109,7 @@ def list_users():
              AND su.outcome!='released' AND su.created_at>=?) AS monthly_jobs,
             (SELECT COALESCE(SUM(ma.size_bytes), 0) FROM media_assets ma
              WHERE ma.owner_id=u.id) AS storage_used_bytes,
-            SUM(CASE WHEN j.status IN ('queued','processing','publishing') THEN 1 ELSE 0 END) AS active_jobs
+            SUM(CASE WHEN j.status IN ('queued','processing','awaiting_review','publishing') THEN 1 ELSE 0 END) AS active_jobs
             FROM users u
             LEFT JOIN subscriptions s ON s.user_id=u.id
             LEFT JOIN jobs j ON j.owner_id=u.id
@@ -1516,6 +1518,7 @@ def update_job(job_id: int, status: str, **fields) -> None:
     allowed = {
         "topic", "title", "description", "hashtags",
         "video_path", "script_path", "log_path", "error", "creative_metadata",
+        "review_stage", "narration_voice", "voice_direction",
     }
     updates = {key: value for key, value in fields.items() if key in allowed}
     updates.update(status=status, updated_at=utc_now())
@@ -1551,6 +1554,57 @@ def retry_job(job_id: int) -> None:
             "UPDATE story_usage SET outcome='pending', updated_at=? WHERE job_id=?",
             (utc_now(), job_id),
         )
+
+
+def continue_review(job_id: int, owner_id: int, expected_stage: str) -> bool:
+    """Advance an owned paused job without allowing stale double submissions."""
+    transitions = {
+        "script": "script_approved",
+        "storyboard": "storyboard_approved",
+        "images": "images_approved",
+        "audio": "audio_approved",
+        "rough": "rough_approved",
+    }
+    next_stage = transitions.get(expected_stage)
+    if not next_stage:
+        return False
+    with connect() as db:
+        row = db.execute(
+            """UPDATE jobs SET status='queued', review_stage=?, error=NULL, updated_at=?
+            WHERE id=? AND owner_id=? AND status='awaiting_review' AND review_stage=?
+            RETURNING id""",
+            (next_stage, utc_now(), job_id, owner_id, expected_stage),
+        ).fetchone()
+        return bool(row)
+
+
+def restart_review_stage(job_id: int, owner_id: int, stage: str) -> bool:
+    """Queue the command that produces a rejected review stage again."""
+    restart_from = {
+        "script": "",
+        "storyboard": "script_approved",
+        "images": "storyboard_approved",
+        "audio": "images_approved",
+        "rough": "audio_approved",
+    }.get(stage)
+    if restart_from is None:
+        return False
+    with connect() as db:
+        if stage == "script":
+            row = db.execute(
+                """UPDATE jobs SET status='queued', review_stage='script_regenerate', script_path=NULL,
+                error=NULL, updated_at=? WHERE id=? AND owner_id=?
+                AND status='awaiting_review' AND review_stage='script' RETURNING id""",
+                (utc_now(), job_id, owner_id),
+            ).fetchone()
+        else:
+            row = db.execute(
+                """UPDATE jobs SET status='queued', review_stage=?, error=NULL, updated_at=?
+                WHERE id=? AND owner_id=? AND status='awaiting_review' AND review_stage=?
+                RETURNING id""",
+                (restart_from, utc_now(), job_id, owner_id, stage),
+            ).fetchone()
+        return bool(row)
 
 
 def request_job_deletion(job_id: int) -> None:

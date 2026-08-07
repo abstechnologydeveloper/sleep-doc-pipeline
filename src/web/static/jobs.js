@@ -91,6 +91,7 @@
   const statusLabels = {
     queued: "Waiting to start",
     processing: "Creating your video",
+    awaiting_review: "Waiting for your review",
     publishing: "Sending to channel",
     completed: "Ready to watch",
     published: "Published",
@@ -146,6 +147,10 @@
         if (statusText) statusText.textContent = displayStatus(job.status);
         const title = document.querySelector("[data-job-detail-title]");
         if (title && job.title) title.textContent = job.title;
+        if (job.status === "awaiting_review" && !document.querySelector(".review-workspace")) {
+          location.reload();
+          return;
+        }
         if (job.video_ready && !document.querySelector("video")) location.reload();
       }
     });
