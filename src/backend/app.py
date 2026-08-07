@@ -44,8 +44,7 @@ from .publishers import (
 from .worker import start_worker
 from .social_preview import landing_preview_png
 from .plans import (
-    CONTENT_STYLES, NICHE_OPTIONS, PAID_PLAN_KEYS, PLAN_RANK, PLANS,
-    VOICE_DIRECTIONS, VOICE_OPTIONS,
+    PAID_PLAN_KEYS, PLAN_RANK, PLANS, VOICE_DIRECTIONS, VOICE_OPTIONS,
     prompt_starters,
 )
 from .content_policy import validate_creator_content
@@ -263,7 +262,7 @@ def page_context(request: Request, section: str, **values) -> dict:
         "showcase": "Story Gallery",
         "social": "Publish",
         "notifications": "Updates",
-        "settings": "Video Recipe",
+        "settings": "Settings",
         "subscription": "Subscription",
         "jobs": "My Videos",
         "customers": "Customers",
@@ -826,11 +825,6 @@ def dashboard(request: Request):
             connectors=connectors,
             storage_usage=None if include_all else creator_storage(user),
             creator_setup=None if include_all else {
-                "profile_complete": bool(
-                    str(user["creator_niche"]).strip()
-                    and str(user["target_audience"]).strip()
-                    and str(user["creator_goal"]).strip()
-                ),
                 "has_video": summary["total"] > 0,
                 "youtube_connected": any(
                     item.name == "youtube" and item.configured for item in connectors
@@ -865,12 +859,7 @@ def storytelling_page(request: Request):
             storage_usage=creator_storage(user),
             voice_options=VOICE_OPTIONS,
             voice_directions=VOICE_DIRECTIONS,
-            prompt_starters=prompt_starters(str(user["creator_niche"])),
-            profile_complete=bool(
-                str(user["creator_niche"]).strip()
-                and str(user["target_audience"]).strip()
-                and str(user["creator_goal"]).strip()
-            ),
+            prompt_starters=prompt_starters(""),
         ),
     )
 
@@ -961,13 +950,6 @@ def settings_page(request: Request):
             voice_directions=VOICE_DIRECTIONS,
             current_plan=PLANS.get(user["plan"], PLANS["free"]),
             connectors=connector_statuses(int(user["id"])),
-            niche_options=NICHE_OPTIONS,
-            content_styles=CONTENT_STYLES,
-            profile_complete=bool(
-                str(user["creator_niche"]).strip()
-                and str(user["target_audience"]).strip()
-                and str(user["creator_goal"]).strip()
-            ),
         ),
     )
 
@@ -997,10 +979,6 @@ def update_settings(
     request: Request,
     name: str = Form(""),
     channel_name: str = Form(""),
-    creator_niche: str = Form(""),
-    target_audience: str = Form(""),
-    content_style: str = Form("cinematic"),
-    creator_goal: str = Form(""),
     narration_voice: str = Form(),
     voice_direction: str = Form("neutral"),
     default_story_minutes: float = Form(),
@@ -1018,24 +996,12 @@ def update_settings(
         return HTMLResponse("Choose a supported narration voice", status_code=400)
     if voice_direction not in VOICE_DIRECTIONS:
         return HTMLResponse("Choose a supported voice direction", status_code=400)
-    if not creator_niche.strip() or len(creator_niche.strip()) > 120:
-        return HTMLResponse("Enter a story type using 120 characters or fewer", status_code=400)
-    if not content_style.strip() or len(content_style.strip()) > 300:
-        return HTMLResponse("Enter a picture style using 300 characters or fewer", status_code=400)
-    if not target_audience.strip() or len(target_audience.strip()) > 160:
-        return HTMLResponse("Describe your viewers using 160 characters or fewer", status_code=400)
-    if not creator_goal.strip() or len(creator_goal.strip()) > 300:
-        return HTMLResponse("Describe your video goal using 300 characters or fewer", status_code=400)
     if not 0.5 <= default_story_minutes <= float(user["max_minutes_per_job"]):
         return HTMLResponse("Default duration exceeds your plan limit", status_code=400)
     database.update_creator_settings(
         int(user["id"]),
         name=name.strip()[:120],
         channel_name=channel_name.strip()[:120],
-        creator_niche=creator_niche.strip(),
-        target_audience=target_audience.strip()[:160],
-        content_style=content_style.strip(),
-        creator_goal=creator_goal.strip()[:300],
         narration_voice=narration_voice,
         voice_direction=voice_direction,
         default_story_minutes=default_story_minutes,

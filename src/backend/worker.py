@@ -135,10 +135,6 @@ def run_automatic(job, log_file, recent_script_paths: list[str] | None = None) -
         "--voice", voice,
         "--voice-direction", voice_direction,
         "--max-images", str(job.get("max_images") or 8),
-        "--niche", job.get("creator_niche") or "",
-        "--audience", job.get("target_audience") or "",
-        "--goal", job.get("creator_goal") or "",
-        "--content-style", job.get("content_style") or "cinematic",
     ])
     for recent_script_path in recent_script_paths or []:
         command.extend(["--recent-script", recent_script_path])
@@ -275,12 +271,7 @@ def review_pipeline_stage(
     elif stage:
         script_path = resumable_script(job)
     python = sys.executable
-    common_story_args = [
-        "--title", job["title"],
-        "--niche", job.get("creator_niche") or "",
-        "--audience", job.get("target_audience") or "",
-        "--content-style", job.get("content_style") or "cinematic",
-    ]
+    common_story_args = ["--title", job["title"]]
 
     if stage in {"", "script_regenerate"}:
         if script_path is None:
@@ -302,7 +293,6 @@ def review_pipeline_stage(
             command = [
                 python, str(BASE_DIR / "generate_script.py"),
                 "--minutes", str(job["minutes"]),
-                "--goal", job.get("creator_goal") or "",
                 *common_story_args,
             ]
             for recent_path in recent_script_paths or []:
@@ -500,10 +490,6 @@ def process_job(job) -> None:
                             title=job["title"] or "",
                             description=job["description"] or "",
                             hashtags=job["hashtags"] or "",
-                            niche=job.get("creator_niche") or "",
-                            audience=job.get("target_audience") or "",
-                            content_style=job.get("content_style") or "",
-                            creator_goal=job.get("creator_goal") or "",
                             search_keyword=job.get("search_keyword") or "",
                             recent_ideas=recent_ideas,
                         )
