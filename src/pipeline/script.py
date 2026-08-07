@@ -70,6 +70,18 @@ def recent_character_names(recent_scripts: list[str]) -> list[str]:
     return sorted(names, key=lambda name: (-counts[name], name))[:40]
 
 
+def weak_opening_reason(script: str) -> str:
+    """Flag only unmistakably generic video introductions for one safe retry."""
+    opening = " ".join(script.split()[:80]).lower()
+    if re.match(
+        r"^(?:hello|hi|welcome|welcome back|today we|in this (?:story|video)|"
+        r"sit back|relax and)\b",
+        opening,
+    ):
+        return "generic greeting"
+    return ""
+
+
 def needs_grounded_research(niche: str, topic: str) -> bool:
     """Return whether a topic needs evidence before it becomes narration."""
     return bool(FACTUAL_NICHE_PATTERN.search(f"{niche} {topic}"))
@@ -165,6 +177,9 @@ def revise_factual_script(
     niche: str,
     audience: str,
     creator_goal: str,
+    content_style: str = "",
+    title: str = "",
+    avoid_character_names: list[str] | None = None,
 ) -> str:
     """Correct a failed factual draft once while preserving the requested duration."""
     response = client.models.generate_content(
@@ -184,7 +199,8 @@ CURRENT NARRATION
 {script}""",
         config=types.GenerateContentConfig(
             system_instruction=build_system_prompt(
-                min_words, max_words, niche, audience, creator_goal
+                min_words, max_words, niche, audience, creator_goal,
+                content_style, title, avoid_character_names,
             ),
             max_output_tokens=8_000,
             temperature=0.25,
@@ -197,7 +213,7 @@ CURRENT NARRATION
 
 def build_system_prompt(
     min_words: int, max_words: int, niche: str = "", audience: str = "",
-    creator_goal: str = "", content_style: str = "",
+    creator_goal: str = "", content_style: str = "", title: str = "",
     avoid_character_names: list[str] | None = None,
 ) -> str:
     creator_context = ""
@@ -216,6 +232,44 @@ def build_system_prompt(
             f"{', '.join(avoid_character_names)}. Invent a different name that fits this exact "
             "character, culture, species, place, and time. A required real historical name is allowed.\n"
         )
+    profile_text = f"{niche} {audience} {creator_goal}".lower()
+    if FACTUAL_NICHE_PATTERN.search(profile_text):
+        opening_rule = """- Open inside the most important real moment, choice, discovery, or conflict. Within
+  the first 80 spoken words, establish the relevant place and time in simple language, show
+  what is at stake, and give the viewer the main historical question or promise. Do not begin
+  with a greeting, channel introduction, broad textbook summary, or unsupported dramatic claim."""
+    elif any(
+        word in profile_text
+        for word in ("sleep", "bedtime", "cozy", "relax", "calm", "gentle")
+    ):
+        opening_rule = """- Open with the named lead already doing something visible, then introduce one gentle
+  surprise, problem, missing object, unusual visitor, or unanswered question within the first
+  80 spoken words. State what the lead wants or must do. Stay calm, but do not begin with a
+  long description of weather, scenery, silence, or sleep."""
+    else:
+        opening_rule = """- Open with a visible action, difficult choice, surprising fact, or clear mystery.
+  Within the first 80 spoken words, establish the focal subject, what they want, and the main
+  question that gives the viewer a reason to continue."""
+    if FACTUAL_NICHE_PATTERN.search(profile_text):
+        closing_rule = """- End by answering the opening historical question with supported facts, then explain
+  in two or three plain sentences what changed and why it still matters. Do not end with a
+  generic lesson, channel promotion, invented quotation, or request to like and subscribe."""
+    elif any(
+        word in profile_text
+        for word in ("sleep", "bedtime", "cozy", "relax", "calm", "gentle")
+    ):
+        closing_rule = """- End by paying off the opening surprise and showing the lead safe, changed, or
+  satisfied through one visible final action. Settle the sound and movement naturally. Do not
+  recap the plot, announce a moral, tell the listener to sleep, or add a channel promotion."""
+    else:
+        closing_rule = """- End by resolving the opening question through the lead's choices. Show the result
+  in one memorable final action or image instead of explaining the whole story again."""
+    title_rule = (
+        f'- The working video title is "{title}". The opening question, central conflict, climax, '
+        "and ending must honestly deliver its promise without repeating the title as narration."
+        if title else
+        "- Keep the opening question, central conflict, climax, and ending focused on one honest promise."
+    )
     return f"""You write narration scripts for a storytelling video channel.
 Create one continuous narrative arc with no chapters, chapter headings, numbered sections,
 repeated templates, or other structural labels. Match the energy to the creator's niche,
@@ -238,12 +292,18 @@ Use original language and follow these writing rules:
   feeling, room, or landscape again in different words.
 - Open with a simple curiosity hook, then introduce a small discovery, choice, surprise,
   funny detail, or emotional change regularly so the journey stays interesting.
+{opening_rule}
+{title_rule}
 - Establish one clear central character or focal subject, what they want or need, and the
   main story question early. Do not spend a long opening only describing atmosphere.
 - Build a cause-and-effect chain: each important action, discovery, decision, and consequence
   must grow naturally from what happened before. Avoid coincidences that solve the problem.
 - Give the middle real progress and change. Add a complication, useful discovery, reversal,
   relationship shift, or difficult choice instead of repeating similar scenes.
+- Add a meaningful progress beat roughly every 45 to 90 seconds of expected narration: a new
+  clue, attempt, obstacle, answer, choice, visual location, relationship change, or consequence.
+  Each beat must change what the viewer understands. Do not use fake cliffhangers or repeat the
+  same question in different words.
 - Keep names, relationships, knowledge, motivations, locations, props, time, weather, travel,
   and physical details consistent unless the story clearly changes them.
 - When the topic does not provide a character name, choose a fresh name that fits the setting,
@@ -262,6 +322,7 @@ Use original language and follow these writing rules:
   result from the central character's accumulated choices, learning, kindness, or courage.
 - Resolve the central story question and show the emotional change before a gentle ending.
   Do not rush, preach a moral, recap the whole plot, or introduce a new major conflict.
+{closing_rule}
 - Use natural dialogue and gentle humor when they fit. Never force jokes into sad, tense,
   historical, or reflective moments.
 - Infer the likely audience and genre from the topic. A children's or cartoon story may be
@@ -385,6 +446,7 @@ def generate_script(
     audience: str = "",
     creator_goal: str = "",
     content_style: str = "",
+    title: str = "",
     research_brief: str = "",
     avoid_character_names: list[str] | None = None,
 ) -> str:
@@ -393,7 +455,7 @@ def generate_script(
 
     config = types.GenerateContentConfig(
         system_instruction=build_system_prompt(
-            min_words, max_words, niche, audience, creator_goal, content_style,
+            min_words, max_words, niche, audience, creator_goal, content_style, title,
             avoid_character_names
         ),
         max_output_tokens=8_000,
@@ -418,7 +480,8 @@ def generate_script(
                 f"GROUNDED RESEARCH BRIEF\n{research_brief}"
                 if research_brief else ""
             )
-            prompt = f'The topic is: "{topic}".\n\n{instruction}{evidence}'
+            title_context = f'\nThe working video title is: "{title}".' if title else ""
+            prompt = f'The topic is: "{topic}".{title_context}\n\n{instruction}{evidence}'
         else:
             prompt = instruction
 
@@ -476,6 +539,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--niche", default="", help="Creator niche guidance")
     parser.add_argument("--audience", default="", help="Target audience guidance")
     parser.add_argument("--goal", default="", help="Creator outcome and publishing goal")
+    parser.add_argument("--title", default="", help="Working video title promise")
     parser.add_argument("--content-style", default="", help="Preferred picture direction")
     parser.add_argument(
         "--recent-script",
@@ -578,22 +642,28 @@ def main() -> None:
             audience=args.audience,
             creator_goal=args.goal,
             content_style=args.content_style,
+            title=args.title,
             research_brief=research_brief,
             avoid_character_names=avoided_names,
         )
         repeated_count, repeated_ratio = repeated_story_passages(
             script, recent_scripts
         )
-        if repeated_count < 3 or repeated_ratio < 0.04:
+        repeated_content = repeated_count >= 3 and repeated_ratio >= 0.04
+        opening_issue = weak_opening_reason(script)
+        if not repeated_content and not opening_issue:
             break
         if generation_attempt == 0:
-            print(
-                "The draft repeated recent story passages; generating a fresh version..."
+            reason = (
+                "The draft repeated recent story passages"
+                if repeated_content
+                else f"The draft used a {opening_issue}"
             )
-    else:
-        raise RuntimeError(
-            "The script repeated too much wording from the creator's recent stories."
-        )
+            print(f"{reason}; generating a fresh version...")
+        elif repeated_content:
+            raise RuntimeError(
+                "The script repeated too much wording from the creator's recent stories."
+            )
 
     fact_check = ""
     if factual_mode:
@@ -616,6 +686,9 @@ def main() -> None:
                 args.niche,
                 args.audience,
                 args.goal,
+                args.content_style,
+                args.title,
+                avoided_names,
             )
             fact_check = review_factual_script(client, topic, script, research_brief)
 

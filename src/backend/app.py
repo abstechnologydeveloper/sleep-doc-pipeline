@@ -310,14 +310,14 @@ def creator_job_error(error: str | None) -> str:
         return "Your storage is full. Delete an old video or choose a larger plan, then retry."
     if "daily allocation" in detail or "daily limit" in detail or "quota" in detail:
         return "An AI service reached its usage limit. Please retry later."
-    if "elevenlabs" in detail or "sound request" in detail:
-        return "A sound effect could not be created. Please retry the video."
+    if "ffmpeg" in detail or "assembling" in detail or "render" in detail:
+        return "The final video could not be assembled. Your saved work can be retried."
     if "audio" in detail or "voice" in detail or "tts" in detail:
         return "The narration could not be completed. Please retry the video."
     if "image" in detail or "cloudflare" in detail or "storyboard" in detail:
         return "One or more story pictures could not be completed. Please retry the video."
-    if "ffmpeg" in detail or "assembling" in detail or "render" in detail:
-        return "The final video could not be assembled. Your saved work can be retried."
+    if "elevenlabs" in detail or "sound request" in detail:
+        return "Optional sound effects were unavailable, but they should not stop the video. Please retry."
     if "incomplete narration" in detail or "quality check" in detail:
         return "The story was incomplete, so it was stopped instead of creating a poor video. Please retry."
     if "timed out" in detail or "timeout" in detail or "temporarily unavailable" in detail:
@@ -1616,6 +1616,20 @@ def job_detail(request: Request, job_id: int):
     job, publications = owned_job(request, job_id)
     if not job:
         return HTMLResponse("Job not found", status_code=404)
+    try:
+        creative_metadata = json.loads(str(job["creative_metadata"] or "{}"))
+        if not isinstance(creative_metadata, dict):
+            creative_metadata = {}
+    except (TypeError, ValueError, json.JSONDecodeError):
+        creative_metadata = {}
+    publication_items = []
+    for publication in publications:
+        item = dict(publication)
+        item["analytics_url"] = (
+            f"https://studio.youtube.com/video/{item['remote_id']}/analytics/tab-overview/period-default"
+            if item.get("platform") == "youtube" and item.get("remote_id") else ""
+        )
+        publication_items.append(item)
     return TEMPLATES.TemplateResponse(
         request,
         "job.html",
@@ -1623,7 +1637,8 @@ def job_detail(request: Request, job_id: int):
             request,
             "jobs",
             job=job,
-            publications=publications,
+            publications=publication_items,
+            creative_metadata=creative_metadata,
             feedback=database.get_job_feedback(job_id),
             job_error_message=creator_job_error(job["error"]),
             admin_job_log=(

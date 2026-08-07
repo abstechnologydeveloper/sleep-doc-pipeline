@@ -87,7 +87,9 @@ def normalized_cues(payload: object, scene_ids: list[str]) -> list[dict]:
     return cues[:maximum]
 
 
-def select_ambience(text: str, project_profile: object) -> dict | None:
+def select_ambience(
+    text: str, project_profile: object, planned_ambience: object = None
+) -> dict | None:
     """Choose one unobtrusive loop only for calm, sleep-oriented productions."""
     profile = json.dumps(project_profile, ensure_ascii=False).lower()
     if not any(
@@ -95,6 +97,20 @@ def select_ambience(text: str, project_profile: object) -> dict | None:
         for word in ("sleep", "bedtime", "cozy", "relaxing", "soothing", "restful")
     ):
         return None
+    if isinstance(planned_ambience, dict):
+        prompt = str(planned_ambience.get("prompt", "")).strip()
+        try:
+            volume = min(0.05, max(0.015, float(planned_ambience.get("volume", 0.03))))
+        except (TypeError, ValueError):
+            volume = 0.03
+        if prompt:
+            return {
+                "filename": AMBIENCE_FILENAME,
+                "prompt": prompt[:500],
+                "duration_seconds": AMBIENCE_SECONDS,
+                "volume": volume,
+                "kind": "continuous_ambience",
+            }
     lowered = text.lower()
     ranked = [
         (sum(lowered.count(keyword) for keyword in keywords), prompt)
@@ -161,6 +177,9 @@ def main() -> None:
     if not api_key:
         print("Sound design skipped: ELEVENLABS_API_KEY is not configured.")
         return
+    if not api_key.startswith("sk_"):
+        print("Sound design skipped: ELEVENLABS_API_KEY has an unsupported format.")
+        return
 
     plan_path = IMAGES_DIR / script_path.stem / "scene_plan.json"
     if not plan_path.is_file():
@@ -171,7 +190,7 @@ def main() -> None:
     except (OSError, json.JSONDecodeError) as exc:
         raise SystemExit(f"Could not read scene plan: {exc}") from exc
 
-    if plan.get("version") == 2 and isinstance(plan.get("scenes"), list):
+    if plan.get("version") in {2, 3, 4} and isinstance(plan.get("scenes"), list):
         scene_ids = [str(scene.get("id", "")) for scene in plan["scenes"]]
     else:
         scene_ids = [
@@ -180,7 +199,9 @@ def main() -> None:
         ]
     cues = normalized_cues(plan.get("sound_cues"), scene_ids)
     ambience = select_ambience(
-        script_path.read_text(encoding="utf-8"), plan.get("project_profile", {})
+        script_path.read_text(encoding="utf-8"),
+        plan.get("project_profile", {}),
+        plan.get("continuous_ambience"),
     )
     if not cues and not ambience:
         print("Sound design skipped: no useful sound moments or ambience were selected.")

@@ -106,6 +106,7 @@ def initialize() -> None:
                 share_token TEXT,
                 log_path TEXT,
                 error TEXT,
+                creative_metadata TEXT NOT NULL DEFAULT '{}',
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
@@ -244,6 +245,7 @@ def initialize() -> None:
             ALTER TABLE jobs ADD COLUMN IF NOT EXISTS creator_goal TEXT NOT NULL DEFAULT '';
             ALTER TABLE jobs ADD COLUMN IF NOT EXISTS search_keyword TEXT NOT NULL DEFAULT '';
             ALTER TABLE jobs ADD COLUMN IF NOT EXISTS youtube_privacy TEXT NOT NULL DEFAULT 'private';
+            ALTER TABLE jobs ADD COLUMN IF NOT EXISTS creative_metadata TEXT NOT NULL DEFAULT '{}';
             ALTER TABLE jobs ALTER COLUMN youtube_privacy SET DEFAULT 'public';
             ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS paystack_customer_code TEXT NOT NULL DEFAULT '';
             ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS payment_reference TEXT NOT NULL DEFAULT '';
@@ -1513,7 +1515,7 @@ def touch_processing_job(job_id: int) -> None:
 def update_job(job_id: int, status: str, **fields) -> None:
     allowed = {
         "topic", "title", "description", "hashtags",
-        "video_path", "script_path", "log_path", "error",
+        "video_path", "script_path", "log_path", "error", "creative_metadata",
     }
     updates = {key: value for key, value in fields.items() if key in allowed}
     updates.update(status=status, updated_at=utc_now())

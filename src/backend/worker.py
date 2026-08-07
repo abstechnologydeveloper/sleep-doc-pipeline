@@ -217,10 +217,37 @@ def cleanup_generated_media(video_path: Path) -> None:
     """Remove successful pipeline working media after durable R2 storage."""
     stem = video_path.stem
     video_path.unlink(missing_ok=True)
+    video_path.with_suffix(".srt").unlink(missing_ok=True)
+    video_path.with_suffix(".quality.json").unlink(missing_ok=True)
     (THUMBNAILS_DIR / f"{stem}.jpg").unlink(missing_ok=True)
     (AUDIO_DIR / f"{stem}.wav").unlink(missing_ok=True)
     shutil.rmtree(IMAGES_DIR / stem, ignore_errors=True)
     shutil.rmtree(SOUNDS_DIR / stem, ignore_errors=True)
+
+
+def creative_metadata_for_video(video_path: Path) -> str:
+    """Preserve small creative decisions after temporary generation files are removed."""
+    stem = video_path.stem
+    plan_path = IMAGES_DIR / stem / "scene_plan.json"
+    quality_path = video_path.with_suffix(".quality.json")
+    try:
+        plan = json.loads(plan_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        plan = {}
+    try:
+        quality = json.loads(quality_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        quality = {}
+    metadata = {
+        "project_profile": plan.get("project_profile", {}),
+        "visual_bible": str(plan.get("visual_bible", ""))[:1000],
+        "retention_checkpoints": plan.get("retention_checkpoints", []),
+        "thumbnail_candidates": plan.get("thumbnail_candidates", []),
+        "selected_thumbnail_index": plan.get("selected_thumbnail_index"),
+        "thumbnail_hook": str(plan.get("thumbnail_hook", ""))[:100],
+        "quality": quality,
+    }
+    return json.dumps(metadata, ensure_ascii=False)
 
 
 def cleanup_cancelled_pipeline(script_path: Path) -> None:
@@ -234,6 +261,8 @@ def cleanup_cancelled_pipeline(script_path: Path) -> None:
         AUDIO_DIR / f"{stem}.timings.json",
         VIDEOS_DIR / f"{stem}.mp4",
         VIDEOS_DIR / f"{stem}.rendering.mp4",
+        VIDEOS_DIR / f"{stem}.srt",
+        VIDEOS_DIR / f"{stem}.quality.json",
         THUMBNAILS_DIR / f"{stem}.jpg",
     ):
         path.unlink(missing_ok=True)
@@ -327,6 +356,11 @@ def process_job(job) -> None:
                             job, log_file, recent_script_paths
                         )
                         generated_video = video_path
+                        database.update_job(
+                            job["id"],
+                            "processing",
+                            creative_metadata=creative_metadata_for_video(video_path),
+                        )
                         source_note = research_sources_for_video(video_path)
                         if source_note:
                             description = str(job.get("description") or "").strip()
