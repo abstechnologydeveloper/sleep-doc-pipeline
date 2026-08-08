@@ -7,31 +7,28 @@
 {% if remaining is none %}<div class="usage-strip"><span>Administrator workspace</span><strong>{{ usage }} stories in the last 30 days</strong><span>No creator limit applied</span></div>{% else %}<div class="usage-strip"><span>{{ usage }} of {{ current_user.monthly_job_limit }} stories used in the last 30 days</span><strong>{{ remaining }} remaining</strong><span>{{ current_user.plan|title }} · up to {{ current_user.max_minutes_per_job|int }} minutes · {{ current_user.max_images_per_job }} images</span></div>{% endif %}
 <div class="storage-strip"><div><span>Video storage</span><strong>{{ storage_usage.used|storage_size }} of {{ storage_usage.limit|storage_size }} used</strong></div><div class="storage-meter" role="progressbar" aria-valuenow="{{ storage_usage.percent }}" aria-valuemin="0" aria-valuemax="100"><i style="width: {{ storage_usage.percent }}%"></i></div><small>{{ storage_usage.remaining|storage_size }} available</small></div>
 
-<div class="content-grid form-layout">
-  <section class="panel">
-    <div class="section-heading"><div><h2>1. Choose your starting point</h2><p>We will never rewrite a pasted complete story unless you edit it during review.</p></div></div>
-    <form method="post" action="/jobs/automatic" class="studio-form">
-      <input type="hidden" name="csrf" value="{{ csrf }}">
-      <label>How should the story be created?<select name="script_mode" data-script-mode><option value="ai">Build a story from my idea</option><option value="provided">Use my complete pasted story exactly</option></select></label>
-      <label data-ai-story>What should happen? <span>Optional</span><textarea name="topic" data-topic-input placeholder="For example: A taxi driver discovers that one passenger appears in old photographs from every decade"></textarea><span>One or two sentences are enough. We will build the full story.</span></label>
-      <label data-provided-story hidden>My complete story<textarea name="provided_script" class="provided-story" placeholder="Paste the complete narration here. We will not ask AI to rewrite it."></textarea><span>At least 50 words. Its word count determines the finished video length.</span></label>
-      <div class="prompt-helper" data-ai-story><strong>Need an idea?</strong><p>Select one below, then change any detail you want.</p><div class="prompt-chips">{% for prompt in prompt_starters %}<button type="button" data-prompt-starter="{{ prompt }}">{{ prompt }}</button>{% endfor %}</div></div>
-      <div class="section-heading form-step-heading"><div><h2>2. Video length</h2><p>Short videos finish faster and are best for your first test.</p></div></div>
-      <label data-ai-story>Minutes<input name="minutes" type="number" min="0.5" max="{{ current_user.max_minutes_per_job }}" step="0.5" value="{{ current_user.default_story_minutes }}"><span>Your plan allows up to {{ current_user.max_minutes_per_job|int }} minutes.</span></label>
-      <div class="form-note" data-provided-story hidden>Your pasted story determines the duration at about 150 spoken words per minute. Your plan still allows up to {{ current_user.max_minutes_per_job|int }} minutes.</div>
-      <div class="recipe-preview"><strong>This video will use</strong><span>Only this idea or your exact pasted story</span><span>Your approved storyboard and pictures</span><span>{{ voice_options[current_user.narration_voice] }}</span><a href="/settings">Change voice defaults</a></div>
-      <details class="advanced-options"><summary>Search phrase, schedule, or posting details</summary><div class="studio-form"><label>Target YouTube search phrase <span>Optional</span><input name="search_keyword" maxlength="120" placeholder="For example: train sleep story with rain"><span>Paste the exact phrase you checked in vidIQ. We will use it naturally in the title and description.</span></label><label>Make it later <span data-local-timezone>Uses your device time</span><input type="datetime-local" name="scheduled_at" data-local-schedule></label><label>Video title <span>Created for you when blank</span><input name="title"></label><label>Video description <span>Created for you when blank</span><textarea name="description"></textarea></label><label>Hashtags <span>Created for you when blank</span><input name="hashtags" placeholder="#Story #YouTube"></label></div></details>
-      <button class="button primary create-video-button" type="submit" {{ 'disabled' if current_user.plan == 'free' or (remaining is not none and remaining <= 0) else '' }}>{{ 'Choose a plan to create videos' if current_user.plan == 'free' else 'Start making my video' }}</button>
-    </form>
+<form method="post" action="/jobs/automatic" class="create-studio">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <section class="panel story-composer">
+    <div class="composer-heading"><div><p class="eyebrow">Your story</p><h2>What video do you want to make?</h2><p>Start with a short idea, or paste your finished story exactly as written.</p></div><span class="cartoon-badge">Cartoon video</span></div>
+    <label class="mode-field">Starting point<select name="script_mode" data-script-mode><option value="ai">Turn my idea into a story</option><option value="provided">Use my complete story exactly</option></select></label>
+    <label class="story-writing-field" data-ai-story><span>Describe what happens</span><textarea name="topic" data-topic-input placeholder="Example: Milo, a small river otter in a yellow raincoat, must repair a bridge before a medicine train arrives."></textarea><small>Include the main character, the problem, important actions, and the ending you want.</small></label>
+    <label class="story-writing-field" data-provided-story hidden><span>Paste your complete story</span><textarea name="provided_script" class="provided-story" placeholder="Paste the full narration here. It will not be rewritten."></textarea><small>At least 50 words. You will review it before anything else is created.</small></label>
+    <details class="idea-helper" data-ai-story><summary>Need a story idea?</summary><div class="prompt-chips">{% for prompt in prompt_starters %}<button type="button" data-prompt-starter="{{ prompt }}">{{ prompt }}</button>{% endfor %}</div></details>
+    <details class="advanced-options"><summary>Add a title, YouTube search phrase, or schedule <span>Optional</span></summary><div class="studio-form"><label>Video title <span>Created for you when blank</span><input name="title"></label><label>Target YouTube search phrase<input name="search_keyword" maxlength="120" placeholder="For example: animated train bedtime story"></label><label>Video description <span>Created for you when blank</span><textarea name="description"></textarea></label><label>Hashtags <span>Created for you when blank</span><input name="hashtags" placeholder="#AnimatedStory #Storytime"></label><label>Make it later <span data-local-timezone>Uses your device time</span><input type="datetime-local" name="scheduled_at" data-local-schedule></label></div></details>
   </section>
-  <aside class="panel workflow-note">
-    <p class="eyebrow">You stay in control</p>
-    <ol class="step-list">
-      <li><span>1</span><div><strong>Approve the story</strong><small>Edit the generated story or confirm your pasted version.</small></div></li><li><span>2</span><div><strong>Approve scenes and pictures</strong><small>No paid picture is made before the storyboard is approved.</small></div></li><li><span>3</span><div><strong>Approve voice and sound</strong><small>Listen before we join the complete video.</small></div></li><li><span>4</span><div><strong>Approve the final video</strong><small>Nothing is published without your last approval.</small></div></li>
-    </ol>
-    <div class="outcome-tips"><strong>What controls this video</strong><ul><li>The idea or complete story entered above.</li><li>The script changes you approve.</li><li>The storyboard and each picture you approve.</li><li>The voice and sound you approve before assembly.</li></ul></div>
+
+  <aside class="panel creation-controls">
+    <div><p class="eyebrow">Video setup</p><h2>Ready for review</h2><p>Confirm these simple choices. You can still approve every stage.</p></div>
+    <label data-ai-story>Video length<select name="minutes">{% for minute in [1, 2, 3, 4, 5, 10, 15, 20, 30] if minute <= current_user.max_minutes_per_job %}<option value="{{ minute }}" {{ 'selected' if current_user.default_story_minutes|float == minute else '' }}>{{ minute }} minute{{ '' if minute == 1 else 's' }}</option>{% endfor %}</select><span>Your plan allows up to {{ current_user.max_minutes_per_job|int }} minutes.</span></label>
+    <div class="control-card visual-choice"><span class="control-icon">✦</span><div><strong>Colorful cartoon animation</strong><small>Every person, animal, place, and thumbnail will be illustrated—never photorealistic.</small></div><b>Fixed</b></div>
+    <div class="control-card"><span class="control-icon">◉</span><div><strong>{{ voice_options.get(current_user.narration_voice, 'Ava — natural American female narrator') }}</strong><small>Natural AI33.Pro narration. Listen and change it before assembly.</small></div><a href="/settings">Change</a></div>
+    <div class="form-note" data-provided-story hidden>Your pasted story sets its own length at about 150 spoken words per minute.</div>
+    <div class="approval-path"><strong>Your approval path</strong><ol><li><span>1</span>Story</li><li><span>2</span>Scenes</li><li><span>3</span>Cartoon images</li><li><span>4</span>Voice and sound</li><li><span>5</span>Final video</li></ol></div>
+    <button class="button primary create-video-button" type="submit" {{ 'disabled' if current_user.plan == 'free' or (remaining is not none and remaining <= 0) else '' }}>{{ 'Choose a plan to create videos' if current_user.plan == 'free' else 'Create story for my review' }}</button>
+    <small class="cost-note">No paid image is generated until you approve the storyboard.</small>
   </aside>
-</div>
+</form>
 
 <section class="panel">
   <div class="section-heading"><div><h2>Your recent story videos</h2><p>This list updates while your video is being created.</p></div><a href="/jobs?workflow=storytelling">View all</a></div>

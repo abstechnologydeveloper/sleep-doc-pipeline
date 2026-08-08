@@ -24,7 +24,7 @@ from pipeline.script import safe_topic_slug
 
 from . import database, storage
 from .content import generate_post_metadata
-from .plans import VOICE_DIRECTIONS, VOICE_OPTIONS
+from .plans import DEFAULT_NARRATION_VOICE, VOICE_DIRECTIONS, VOICE_OPTIONS
 from .publishers import publish
 
 
@@ -118,9 +118,9 @@ def run_automatic(job, log_file, recent_script_paths: list[str] | None = None) -
         command.extend(["--resume-script", str(script_path)])
     else:
         command.extend([job["topic"], str(job["minutes"])])
-    requested_voice = job.get("narration_voice") or "Kore"
+    requested_voice = job.get("narration_voice") or DEFAULT_NARRATION_VOICE
     requested_direction = job.get("voice_direction") or "neutral"
-    voice = requested_voice if requested_voice in VOICE_OPTIONS else "Kore"
+    voice = requested_voice if requested_voice in VOICE_OPTIONS else DEFAULT_NARRATION_VOICE
     voice_direction = (
         requested_direction if requested_direction in VOICE_DIRECTIONS else "neutral"
     )
@@ -317,6 +317,7 @@ def review_pipeline_stage(
     image_command = [
         python, str(BASE_DIR / "generate_images.py"), str(script_path),
         *common_story_args,
+        "--content-style", "colorful animated storybook cartoon",
         "--max-images", str(job.get("max_images") or 8),
     ]
     if stage == "script_approved":
@@ -334,7 +335,11 @@ def review_pipeline_stage(
             log_file,
             [
                 python, str(BASE_DIR / "generate_audio.py"), str(script_path),
-                "--voice", job.get("narration_voice") or "Kore",
+                "--voice", (
+                    job.get("narration_voice")
+                    if job.get("narration_voice") in VOICE_OPTIONS
+                    else DEFAULT_NARRATION_VOICE
+                ),
                 "--voice-direction", job.get("voice_direction") or "neutral",
             ],
         )
@@ -414,6 +419,7 @@ def cleanup_cancelled_pipeline(script_path: Path) -> None:
     for path in (
         AUDIO_DIR / f"{stem}.wav",
         AUDIO_DIR / f"{stem}.timings.json",
+        AUDIO_DIR / f"{stem}.transcript.srt",
         VIDEOS_DIR / f"{stem}.mp4",
         VIDEOS_DIR / f"{stem}.rendering.mp4",
         VIDEOS_DIR / f"{stem}.srt",

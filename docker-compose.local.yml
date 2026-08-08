@@ -1,0 +1,27 @@
+services:
+  studio:
+    command:
+      - uvicorn
+      - backend.app:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8090"
+      - --proxy-headers
+      - --forwarded-allow-ips=*
+      - --reload
+      - --reload-dir
+      - /app/src
+      - --reload-dir
+      - /app/src/pipeline
+      - --reload-include
+      - "*.html"
+      - --reload-include
+      - "*.css"
+      - --reload-include
+      - "*.js"
+    environment:
+      PUBLIC_BASE_URL: http://127.0.0.1:8090
+      COOKIE_SECURE: "false"
+    volumes:
+      - .:/app

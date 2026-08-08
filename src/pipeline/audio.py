@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Turn a saved narration script into a single narrated audio file using
-Google AI Studio's Gemini TTS (free tier).
+AI33.Pro text-to-speech.
 
 Resumable: each chunk is saved to disk as soon as it's generated, so a dropped
 connection or Ctrl+C only costs you the chunk in progress, not the whole run.
@@ -12,33 +12,35 @@ Usage:
 """
 
 import argparse
-import io
 import json
 import os
 import re
 import shutil
+import subprocess
 import time
 import wave
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-
 from dotenv import load_dotenv
-from google import genai
-from google.genai import types
-from google.genai import errors as genai_errors
 
+from .ai33 import (
+    download_url,
+    submit_file_task,
+    submit_multipart_task,
+    wait_for_audio,
+    wait_for_task,
+)
 from project_paths import AUDIO_DIR, PROJECT_ROOT, SCRIPTS_DIR
 
 
-MODEL = "gemini-2.5-flash-preview-tts"
-DEFAULT_VOICE = "Kore"
-MAX_CHARS_PER_CHUNK = 500
+DEFAULT_VOICE = "edge_en-US-AvaNeural"
+MAX_CHARS_PER_CHUNK = 1_200
 SAMPLE_RATE = 24_000
 CHANNELS = 1
 SAMPLE_WIDTH = 2
 MAX_RETRIES = 5
 RETRY_BASE_DELAY = 5  # seconds, doubles each retry
-DEFAULT_WORKERS = 3
+DEFAULT_WORKERS = 2
 
 ChunkJob = tuple[int, str, Path]
 
@@ -63,110 +65,80 @@ def split_into_chunks(text: str, max_chars: int = MAX_CHARS_PER_CHUNK) -> list[s
 
 
 def generate_chunk_audio(
-    client: genai.Client, text: str, voice: str, voice_direction: str
+    api_key: str, text: str, voice: str, voice_direction: str
 ) -> bytes:
+    delivery_speeds = {
+        "neutral": 1.0, "masculine": 1.0, "feminine": 1.0,
+        "youthful": 1.03, "mature": 0.98, "deep": 0.98,
+        "warm": 0.99, "bright": 1.02,
+    }
     last_error = None
 
     for attempt in range(1, MAX_RETRIES + 1):
         try:
-            response = client.models.generate_content(
-                model=MODEL,
-                contents=(
-                    "Synthesize clear, audible speech from the transcript below. "
-                    "Read every word calmly and exactly as written. "
-                    f"Use a {voice_direction} voice quality.\n\n"
-                    f"TRANSCRIPT:\n{text}"
-                ),
-                config=types.GenerateContentConfig(
-                    response_modalities=["AUDIO"],
-                    speech_config=types.SpeechConfig(
-                        voice_config=types.VoiceConfig(
-                            prebuilt_voice_config=types.PrebuiltVoiceConfig(
-                                voice_name=voice
-                            )
-                        )
-                    ),
-                ),
+            task_id = submit_multipart_task(
+                api_key,
+                "/v3/text-to-speech",
+                {
+                    "text": text,
+                    "voice_id": voice,
+                    "speed": delivery_speeds.get(voice_direction, 1.0),
+                    "with_transcript": "true",
+                    "file_name": "narration.mp3",
+                },
             )
-            return extract_pcm_audio(response)
-        except (
-            genai_errors.ServerError,
-            genai_errors.ClientError,
-            ConnectionError,
-            TimeoutError,
-            RuntimeError,
-        ) as exc:
+            return wait_for_audio(api_key, task_id)
+        except RuntimeError as exc:
             last_error = exc
-            if attempt == MAX_RETRIES:
+            if "output download failed" in str(exc).lower():
                 break
-            delay = RETRY_BASE_DELAY * (2 ** (attempt - 1))
-            print(
-                f"    audio response error on attempt {attempt}/{MAX_RETRIES} "
-                f"({exc}). Retrying in {delay}s..."
-            )
-            time.sleep(delay)
+        if attempt == MAX_RETRIES:
+            break
+        delay = RETRY_BASE_DELAY * (2 ** (attempt - 1))
+        print(
+            f"    narration response error on attempt {attempt}/{MAX_RETRIES} "
+            f"({last_error}). Retrying in {delay}s..."
+        )
+        time.sleep(delay)
 
     raise RuntimeError(
-        f"Failed to generate audio after {MAX_RETRIES} attempts."
+        "AI33.Pro could not generate the narration. Check the API key, voice access, "
+        "account balance, and request limits."
     ) from last_error
 
 
-def extract_pcm_audio(response: object) -> bytes:
-    """Extract raw PCM samples, decoding a WAV response when necessary."""
-    audio_data = None
-    mime_type = ""
-    for candidate in getattr(response, "candidates", None) or []:
-        content = getattr(candidate, "content", None)
-        for part in getattr(content, "parts", None) or []:
-            inline_data = getattr(part, "inline_data", None)
-            data = getattr(inline_data, "data", None)
-            current_mime_type = (
-                getattr(inline_data, "mime_type", "") or ""
-            ).lower()
-            if data and (
-                not current_mime_type
-                or "audio" in current_mime_type
-                or "pcm" in current_mime_type
-                or "wav" in current_mime_type
-                or "l16" in current_mime_type
-            ):
-                audio_data = data
-                mime_type = current_mime_type
-                break
-        if audio_data:
-            break
-
-    if not audio_data:
-        raise RuntimeError("The voice service returned no usable audio data.")
-
-    if "wav" in mime_type:
-        with wave.open(io.BytesIO(audio_data), "rb") as input_wf:
-            if (
-                input_wf.getnchannels() != CHANNELS
-                or input_wf.getsampwidth() != SAMPLE_WIDTH
-                or input_wf.getframerate() != SAMPLE_RATE
-            ):
-                raise RuntimeError(
-                    "The voice service returned WAV audio with an unexpected format."
-                )
-            return input_wf.readframes(input_wf.getnframes())
-
-    if not mime_type or "pcm" in mime_type or "l16" in mime_type:
-        return audio_data
-
-    raise RuntimeError(f"Unsupported voice audio format: {mime_type}")
-
-
-def write_wave(path: Path, pcm_data: bytes) -> None:
-    with wave.open(str(path), "wb") as wf:
-        wf.setnchannels(CHANNELS)
-        wf.setsampwidth(SAMPLE_WIDTH)
-        wf.setframerate(SAMPLE_RATE)
-        wf.writeframes(pcm_data)
+def convert_mp3_to_wave(mp3_data: bytes, output_path: Path) -> None:
+    """Convert AI33.Pro audio to the WAV contract used by the video pipeline."""
+    temporary_mp3 = output_path.with_suffix(".generating.mp3")
+    temporary_wave = output_path.with_suffix(".generating.wav")
+    temporary_mp3.write_bytes(mp3_data)
+    try:
+        subprocess.run(
+            [
+                "ffmpeg", "-y", "-loglevel", "error", "-i", str(temporary_mp3),
+                "-af",
+                (
+                    "silenceremove=start_periods=1:start_duration=0.08:"
+                    "start_threshold=-50dB,areverse,"
+                    "silenceremove=start_periods=1:start_duration=0.08:"
+                    "start_threshold=-50dB,areverse,apad=pad_dur=0.12"
+                ),
+                "-ac", str(CHANNELS), "-ar", str(SAMPLE_RATE),
+                "-c:a", "pcm_s16le", str(temporary_wave),
+            ],
+            check=True,
+            capture_output=True,
+        )
+        temporary_wave.replace(output_path)
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise RuntimeError("FFmpeg could not prepare the AI33.Pro narration audio.") from exc
+    finally:
+        temporary_mp3.unlink(missing_ok=True)
+        temporary_wave.unlink(missing_ok=True)
 
 
 def narrate_chunk(
-    client: genai.Client,
+    api_key: str,
     chunk_number: int,
     total_chunks: int,
     text: str,
@@ -179,16 +151,14 @@ def narrate_chunk(
         f"  Narrating chunk {chunk_number}/{total_chunks} "
         f"({len(text)} chars)..."
     )
-    pcm = generate_chunk_audio(client, text, voice, voice_direction)
-    temporary_path = output_path.with_suffix(".wav.tmp")
-    write_wave(temporary_path, pcm)
-    temporary_path.replace(output_path)
+    mp3 = generate_chunk_audio(api_key, text, voice, voice_direction)
+    convert_mp3_to_wave(mp3, output_path)
     return chunk_number
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Generate narrated audio from a saved script using Gemini TTS."
+        description="Generate natural narration from a saved script using AI33.Pro."
     )
     parser.add_argument(
         "script_path",
@@ -198,7 +168,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--voice",
         default=DEFAULT_VOICE,
-        help=f"Gemini prebuilt narration voice (default: {DEFAULT_VOICE})",
+        help=f"AI33.Pro narration voice ID (default: {DEFAULT_VOICE})",
     )
     parser.add_argument(
         "--voice-direction",
@@ -256,11 +226,11 @@ def load_api_key() -> str:
     env_path = PROJECT_ROOT / ".env"
     load_dotenv(dotenv_path=env_path, override=True)
 
-    api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+    api_key = os.getenv("AI33_API_KEY", "").strip()
     if not api_key:
         raise SystemExit(
-            "GEMINI_API_KEY was not found. Get a free key from Google AI Studio "
-            "(aistudio.google.com) and add it to .env as GEMINI_API_KEY=your_key_here"
+            "AI33_API_KEY is required for narration. Add it to .env before "
+            "creating a voice preview."
         )
     return api_key
 
@@ -279,7 +249,7 @@ def collect_pending_chunks(chunks: list[str], chunk_dir: Path) -> list[ChunkJob]
 
 
 def generate_pending_chunks(
-    client: genai.Client,
+    api_key: str,
     pending_chunks: list[ChunkJob],
     total_chunks: int,
     requested_workers: int,
@@ -295,7 +265,7 @@ def generate_pending_chunks(
         futures = {
             executor.submit(
                 narrate_chunk,
-                client,
+                api_key,
                 chunk_number,
                 total_chunks,
                 chunk,
@@ -367,6 +337,30 @@ def write_timing_file(
     return timing_path
 
 
+def write_speech_transcript(api_key: str, audio_path: Path) -> Path | None:
+    """Save AI33 speech-measured captions without making narration failure-prone."""
+    transcript_path = audio_path.with_suffix(".transcript.srt")
+    try:
+        task_id = submit_file_task(
+            api_key,
+            "/v1/task/speech-to-text",
+            audio_path,
+            {"tag_audio_events": "false"},
+        )
+        task = wait_for_task(api_key, task_id)
+        metadata = task.get("metadata") if isinstance(task.get("metadata"), dict) else {}
+        srt_url = metadata.get("srt_url")
+        if not isinstance(srt_url, str):
+            raise RuntimeError("AI33.Pro completed transcription without an SRT file.")
+        temporary_path = transcript_path.with_suffix(".srt.tmp")
+        temporary_path.write_bytes(download_url(srt_url))
+        temporary_path.replace(transcript_path)
+        return transcript_path
+    except (OSError, RuntimeError) as exc:
+        print(f"Warning: precise speech captions were unavailable ({exc})")
+        return None
+
+
 def main() -> None:
     args = parse_args()
     script_path = select_script(args.script_path)
@@ -379,35 +373,20 @@ def main() -> None:
     print(f"Script split into {len(chunks)} chunks for narration.")
 
     # Each script gets its own subfolder of chunk files, so reruns can resume.
-    chunk_dir = AUDIO_DIR / f"{script_path.stem}_chunks"
+    safe_voice = re.sub(r"[^A-Za-z0-9_-]+", "-", args.voice)[:40]
+    safe_direction = re.sub(r"[^A-Za-z0-9_-]+", "-", args.voice_direction)[:20]
+    chunk_dir = AUDIO_DIR / (
+        f"{script_path.stem}_ai33_v2_{safe_voice}_{safe_direction}_chunks"
+    )
     chunk_dir.mkdir(parents=True, exist_ok=True)
 
-    client = genai.Client(api_key=api_key)
     pending_chunks = collect_pending_chunks(chunks, chunk_dir)
-    print(f"Narration voice: {args.voice}")
+    print(f"AI33.Pro narration voice: {args.voice}")
     print(f"Voice direction: {args.voice_direction}")
-    try:
-        generate_pending_chunks(
-            client, pending_chunks, len(chunks), args.workers,
-            args.voice, args.voice_direction,
-        )
-    except RuntimeError:
-        if args.voice == DEFAULT_VOICE and args.voice_direction == "neutral":
-            raise
-        print(
-            f"Narrator {args.voice} could not complete the narration. "
-            f"Regenerating every part with {DEFAULT_VOICE}."
-        )
-        for chunk_path in chunk_dir.glob("chunk_*.wav"):
-            chunk_path.unlink(missing_ok=True)
-        generate_pending_chunks(
-            client,
-            collect_pending_chunks(chunks, chunk_dir),
-            len(chunks),
-            1,
-            DEFAULT_VOICE,
-            "neutral",
-        )
+    generate_pending_chunks(
+        api_key, pending_chunks, len(chunks), args.workers,
+        args.voice, args.voice_direction,
+    )
 
     # Stitch all chunk files together into the final audio file.
     print("\nAll chunks ready. Stitching into final audio file...")
@@ -417,10 +396,13 @@ def main() -> None:
     timing_path = write_timing_file(
         chunks, chunk_dir, output_path, total_frames
     )
+    transcript_path = write_speech_transcript(api_key, output_path)
 
     duration_seconds = total_frames / SAMPLE_RATE
     print(f"\nSaved narrated audio to {output_path}")
     print(f"Saved caption timing data to {timing_path}")
+    if transcript_path:
+        print(f"Saved speech-measured captions to {transcript_path}")
     print(f"Approximate duration: {duration_seconds / 60:.1f} minutes")
 
     try:

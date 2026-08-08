@@ -39,17 +39,6 @@ VIDEO_FPS = 24
 THUMBNAIL_WIDTH = 3840
 THUMBNAIL_HEIGHT = 2160
 MAX_YOUTUBE_THUMBNAIL_BYTES = 1_950_000
-EFFECT_POINTS = (
-    (96, 88, 2.9, 0.2),
-    (211, 142, 3.7, 1.1),
-    (337, 76, 3.2, 2.0),
-    (482, 176, 4.1, 0.7),
-    (629, 104, 3.5, 1.8),
-    (773, 157, 4.4, 2.6),
-    (918, 69, 3.1, 0.9),
-    (1061, 129, 3.9, 2.2),
-    (1176, 91, 4.6, 1.4),
-)
 
 
 def select_script(script_argument: str | None) -> Path:
@@ -173,32 +162,11 @@ def resolve_scene_images(image_dir: Path, scenes: list[dict]) -> list[Path]:
 
 
 def load_scene_directions(image_dir: Path, scene_count: int) -> list[dict]:
-    """Load art-directed camera, transition, and atmosphere choices when available."""
-    default = [
-        {"camera": "slow_push", "transition": "fade", "atmosphere": "auto"}
+    """Return the fixed still-image and fade-only direction contract."""
+    return [
+        {"camera": "static", "transition": "fade", "atmosphere": "none"}
         for _index in range(scene_count)
     ]
-    plan_path = image_dir / "scene_plan.json"
-    if not plan_path.is_file():
-        return default
-    try:
-        payload = json.loads(plan_path.read_text(encoding="utf-8"))
-        if payload.get("version") in {2, 3, 4, 5}:
-            scenes = payload.get("scenes")
-            if isinstance(scenes, list) and len(scenes) == scene_count:
-                return [
-                    scene.get("direction", default[index])
-                    if isinstance(scene, dict)
-                    else default[index]
-                    for index, scene in enumerate(scenes)
-                ]
-        directions = payload.get("scene_directions")
-        if not isinstance(directions, list) or len(directions) != scene_count:
-            return default
-        return [direction if isinstance(direction, dict) else default[index]
-                for index, direction in enumerate(directions)]
-    except (OSError, json.JSONDecodeError):
-        return default
 
 
 def load_thumbnail_hook(image_dir: Path) -> str:
@@ -278,6 +246,24 @@ def load_continuous_ambience(script_stem: str) -> dict | None:
     return {"path": path, "volume": volume} if path.is_file() else None
 
 
+def load_background_music(script_stem: str) -> dict | None:
+    """Load one quiet instrumental track that FFmpeg loops beneath narration."""
+    sound_dir = SOUNDS_DIR / script_stem
+    manifest_path = sound_dir / "sound_manifest.json"
+    if not manifest_path.is_file():
+        return None
+    try:
+        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+        music = payload.get("music")
+        if not isinstance(music, dict):
+            return None
+        path = sound_dir / Path(str(music["filename"])).name
+        volume = min(0.06, max(0.02, float(music.get("volume", 0.045))))
+    except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError):
+        return None
+    return {"path": path, "volume": volume} if path.is_file() else None
+
+
 def timed_scene_durations(
     scenes: list[dict], text: str, duration: float, timing_path: Path
 ) -> list[float]:
@@ -333,6 +319,34 @@ def load_caption_segments(
     text: str, duration: float, timing_path: Path
 ) -> list[tuple[str, float, float]]:
     """Load measured TTS boundaries, falling back for legacy audio files."""
+    transcript_path = timing_path.with_name(
+        timing_path.name.replace(".timings.json", ".transcript.srt")
+    )
+    if transcript_path.is_file():
+        try:
+            transcript = transcript_path.read_text(encoding="utf-8-sig")
+            matches = re.findall(
+                r"(?m)^\d+\s*\n"
+                r"(\d{2}):(\d{2}):(\d{2})[,.](\d{3})\s*-->\s*"
+                r"(\d{2}):(\d{2}):(\d{2})[,.](\d{3})\s*\n"
+                r"(.+?)(?=\n\s*\n|\Z)",
+                transcript,
+                flags=re.DOTALL,
+            )
+            segments = []
+            for match in matches:
+                values = [int(value) for value in match[:8]]
+                start = values[0] * 3600 + values[1] * 60 + values[2] + values[3] / 1000
+                end = values[4] * 3600 + values[5] * 60 + values[6] + values[7] / 1000
+                spoken_text = " ".join(match[8].replace("\n", " ").split())
+                if spoken_text and end > start:
+                    segments.append((spoken_text, start, min(end, duration)))
+            if segments and abs(segments[-1][2] - duration) <= max(2.0, duration * 0.03):
+                return segments
+        except (OSError, TypeError, ValueError):
+            pass
+        print(f"Warning: ignoring invalid speech transcript: {transcript_path}")
+
     if timing_path.is_file():
         try:
             payload = json.loads(timing_path.read_text(encoding="utf-8"))
@@ -398,7 +412,7 @@ def build_video_filter(
     scene_directions: list[dict] | None = None,
     use_transitions: bool = True,
 ) -> tuple[str, list[float]]:
-    """Build cinematic movement, contextual effects, fades, and captions."""
+    """Build completely still images with soft fades and captions."""
     transition = (
         min(
             TRANSITION_SECONDS,
@@ -414,108 +428,17 @@ def build_video_filter(
 
     filters = []
     for index in range(len(scene_durations)):
-        scene_text = scene_texts[index].lower() if index < len(scene_texts) else ""
-        direction = (
-            scene_directions[index]
-            if scene_directions and index < len(scene_directions)
-            else {}
-        )
-        frame_count = max(1, round(input_durations[index] * VIDEO_FPS))
-        camera = direction.get("camera", "slow_push")
-        if camera == "pan_left":
-            pan_x = f"(iw-iw/zoom)*(1-on/{frame_count})"
-        elif camera == "pan_right":
-            pan_x = f"(iw-iw/zoom)*on/{frame_count}"
-        else:
-            pan_x = "iw/2-(iw/zoom/2)"
-        if camera == "pan_up":
-            pan_y = f"(ih-ih/zoom)*(1-on/{frame_count})"
-        elif camera == "pan_down":
-            pan_y = f"(ih-ih/zoom)*on/{frame_count}"
-        else:
-            pan_y = "ih/2-(ih/zoom/2)"
-        motion_frames = max(1, frame_count - 1)
-        zoom = (
-            f"1.22-0.22*on/{motion_frames}"
-            if camera == "slow_pull"
-            else f"1.0+0.22*on/{motion_frames}"
-        )
-
-        directed_effect = direction.get("atmosphere", "auto")
-        if directed_effect in {"stars", "rain", "snow", "embers", "fog", "motes", "none"}:
-            effect = directed_effect
-        else:
-            effect = "auto"
-
-        if any(word in scene_text for word in ("fireplace", "hearth", "candle", "lantern")):
-            grade = "eq=saturation=1.16:contrast=1.05:gamma_r=1.04:gamma_b=0.97"
-            effect = "embers" if effect == "auto" else effect
-        elif any(word in scene_text for word in ("rain", "storm", "snow", "mist", "fog")):
-            grade = "eq=saturation=1.09:contrast=1.04:gamma_r=0.98:gamma_b=1.04"
-            effect = "none" if effect == "auto" else effect
-        elif any(
-            phrase in scene_text
-            for phrase in ("starlit", "starry", "constellation", "night sky", "stars above")
-        ):
-            grade = "eq=saturation=1.12:contrast=1.05:gamma_b=1.04"
-            effect = "stars" if effect == "auto" else effect
-        elif any(word in scene_text for word in ("firefly", "fireflies", "enchanted", "magical garden")):
-            grade = "eq=saturation=1.15:contrast=1.04:gamma_g=1.03"
-            effect = "motes" if effect == "auto" else effect
-        else:
-            grade = "eq=saturation=1.08:contrast=1.035"
-            effect = "none" if effect == "auto" else effect
-
         scene_filter = (
             f"[{index}:v]"
             f"scale={VIDEO_WIDTH}:{VIDEO_HEIGHT}:force_original_aspect_ratio=increase,"
             f"crop={VIDEO_WIDTH}:{VIDEO_HEIGHT},"
-            f"zoompan=z='{zoom}':x='{pan_x}':"
-            f"y='{pan_y}':d=1:s={VIDEO_WIDTH}x{VIDEO_HEIGHT}:fps={VIDEO_FPS},"
-            f"{grade},vignette=PI/5,setsar=1,format=yuv420p,"
+            "eq=saturation=1.08:contrast=1.035,vignette=PI/5,"
+            "setsar=1,format=yuv420p,"
             f"fps={VIDEO_FPS},settb=1/{VIDEO_FPS},"
             f"setpts=N/({VIDEO_FPS}*TB)"
         )
-        if effect not in {"", "none", "fog"}:
-            color = "white" if effect == "stars" else "0xffd27f"
-            scale_x = VIDEO_WIDTH / 1280
-            scale_y = VIDEO_HEIGHT / 720
-            y_offset = 0 if effect == "stars" else round(245 * scale_y)
-            for point, (x, y, period, phase) in enumerate(EFFECT_POINTS):
-                x = round(x * scale_x)
-                y = round(y * scale_y)
-                size = round((2 + (point % 2)) * scale_y)
-                if effect == "stars":
-                    effect_x = str(x)
-                    effect_y = str(y)
-                    effect_w = size
-                    effect_h = size
-                elif effect == "rain":
-                    color = "0xb9d9ed"
-                    effect_x = str(x)
-                    effect_y = f"mod({y}+t*{round(115 * scale_y)}+{phase * 45:.1f},{VIDEO_HEIGHT})"
-                    effect_w = 2
-                    effect_h = round(12 * scale_y)
-                elif effect == "snow":
-                    color = "white"
-                    effect_x = f"{x}+{round(14 * scale_x)}*sin(t*0.45+{phase})"
-                    effect_y = f"mod({y}+t*{round(16 * scale_y)}+{phase * 45:.1f},{VIDEO_HEIGHT})"
-                    effect_w = size + 1
-                    effect_h = size + 1
-                else:
-                    effect_x = f"{x}+{round(10 * scale_x)}*sin(t*0.35+{phase})"
-                    effect_y = f"{y + y_offset}-mod(t*{round(5 * scale_y)}+{phase * 27:.1f},{round(110 * scale_y)})"
-                    effect_w = size
-                    effect_h = size
-                scene_filter += (
-                    f",drawbox=x='{effect_x}':y='{effect_y}':w={effect_w}:h={effect_h}:"
-                    f"color={color}@0.45:t=fill:"
-                    f"enable='lt(mod(t+{phase},{period}),0.7)'"
-                )
         scene_filter += f"[scene{index}]"
-        filters.append(
-            scene_filter
-        )
+        filters.append(scene_filter)
 
     if use_transitions and len(scene_durations) > 1:
         current_label = "scene0"
@@ -523,17 +446,9 @@ def build_video_filter(
         for index in range(1, len(scene_durations)):
             output_label = f"fade{index}"
             offset = max(0, current_duration - transition)
-            transition_name = "fade"
-            if scene_directions and index < len(scene_directions):
-                transition_name = {
-                    "fade": "fade",
-                    "dissolve": "dissolve",
-                    "smooth_left": "smoothleft",
-                    "smooth_right": "smoothright",
-                }.get(scene_directions[index].get("transition"), "fade")
             filters.append(
                 f"[{current_label}][scene{index}]"
-                f"xfade=transition={transition_name}:duration={transition:.3f}:"
+                f"xfade=transition=fade:duration={transition:.3f}:"
                 f"offset={offset:.6f}"
                 f",fps={VIDEO_FPS},settb=1/{VIDEO_FPS},"
                 f"setpts=N/({VIDEO_FPS}*TB)"
@@ -591,6 +506,12 @@ def thumbnail_title(title: str, script_stem: str) -> str:
     if not candidate:
         candidate = re.sub(r"^\d{8}_\d{6}_", "", script_stem).replace("-", " ")
     candidate = re.split(r"\s+[|—–]\s+", candidate, maxsplit=1)[0]
+    candidate = re.sub(
+        r"^(?:tell\s+)?(?:the\s+)?(?:true\s+)?story\s+of\s+",
+        "",
+        candidate,
+        flags=re.IGNORECASE,
+    )
     candidate = re.sub(
         r"\b(?:sleep ambient|sleep story|relaxing music)\b.*$",
         "",
@@ -657,7 +578,7 @@ PlayResY: {THUMBNAIL_HEIGHT}
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Title,Arial,174,&H00FFFFFF,&H00FFFFFF,&H00000000,&H86000000,-1,0,0,0,100,100,3,0,3,20,0,4,220,190,150,1
+Style: Title,DejaVu Sans,238,&H00FFFFFF,&H00FFFFFF,&H00101010,&H70000000,-1,0,0,0,100,100,2,0,1,20,8,4,190,2050,150,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -691,13 +612,14 @@ def render_thumbnail(
     output_path = THUMBNAILS_DIR / f"{script_stem}.jpg"
     temporary_output = output_path.with_suffix(".rendering.jpg")
     title_path = write_thumbnail_title_file(
-        thumbnail_title(curiosity_hook or title, script_stem), THUMBNAILS_DIR
+        thumbnail_title(title or curiosity_hook, script_stem), THUMBNAILS_DIR
     )
     thumbnail_filter = (
         f"scale={THUMBNAIL_WIDTH}:{THUMBNAIL_HEIGHT}:force_original_aspect_ratio=increase,"
         f"crop={THUMBNAIL_WIDTH}:{THUMBNAIL_HEIGHT},"
         "eq=saturation=1.30:contrast=1.15:brightness=0.015,"
         "unsharp=7:7:0.85:5:5:0,vignette=PI/7,"
+        "drawbox=x=0:y=0:w=iw*0.54:h=ih:color=black@0.34:t=fill,"
         f"subtitles=filename='{title_path.name}'"
     )
     try:
@@ -846,6 +768,7 @@ def render_video(
     scene_directions: list[dict] | None = None,
     sound_cues: list[dict] | None = None,
     ambience: dict | None = None,
+    music: dict | None = None,
 ) -> None:
     """Render crossfaded images, captions, narration, and sparse effects."""
     ffmpeg_path = shutil.which("ffmpeg")
@@ -891,7 +814,13 @@ def render_video(
         if ambience:
             ambience_input_index = audio_input_index + 1
             command.extend(["-stream_loop", "-1", "-i", str(ambience["path"])])
-        cue_input_start = audio_input_index + 1 + (1 if ambience else 0)
+        music_input_index = None
+        if music:
+            music_input_index = audio_input_index + 1 + (1 if ambience else 0)
+            command.extend(["-stream_loop", "-1", "-i", str(music["path"])])
+        cue_input_start = (
+            audio_input_index + 1 + (1 if ambience else 0) + (1 if music else 0)
+        )
         for cue in sound_cues or []:
             command.extend(["-i", str(cue["path"])])
 
@@ -911,6 +840,17 @@ def render_video(
                 f"afade=t=out:st={fade_out_start:.3f}:d=1.5[ambience]"
             )
             sound_labels.append("[ambience]")
+        if music_input_index is not None:
+            total_duration = sum(scene_durations)
+            fade_out_start = max(0.0, total_duration - 2.5)
+            audio_filters.append(
+                f"[{music_input_index}:a]atrim=duration={total_duration:.3f},"
+                "asetpts=N/SR/TB,highpass=f=90,lowpass=f=9000,"
+                f"volume={music['volume']:.3f},"
+                "afade=t=in:st=0:d=2.0,"
+                f"afade=t=out:st={fade_out_start:.3f}:d=2.5[music]"
+            )
+            sound_labels.append("[music]")
         for index, cue in enumerate(sound_cues or []):
             input_index = cue_input_start + index
             delay_ms = max(0, round(cue["start"] * 1_000))
@@ -1061,6 +1001,7 @@ def main() -> None:
     )
     sound_cues = load_sound_cues(script_path.stem, scenes, scene_durations)
     ambience = load_continuous_ambience(script_path.stem)
+    music = load_background_music(script_path.stem)
 
     print(f"Audio duration: {total_duration / 60:.1f} minutes")
     print(f"Building {len(image_paths)} timed image clips...")
@@ -1068,6 +1009,8 @@ def main() -> None:
         print(f"Mixing {len(sound_cues)} quiet story sound effects...")
     if ambience:
         print("Mixing continuous low-volume ambience...")
+    if music:
+        print("Mixing quiet instrumental background music...")
 
     output_dir = VIDEOS_DIR
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -1085,6 +1028,7 @@ def main() -> None:
         scene_directions,
         sound_cues,
         ambience,
+        music,
     )
     thumbnail_path = render_thumbnail(
         shutil.which("ffmpeg") or "ffmpeg",

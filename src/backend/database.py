@@ -225,7 +225,7 @@ def initialize() -> None:
         db.executescript(
             """
             ALTER TABLE users ADD COLUMN IF NOT EXISTS max_images_per_job INTEGER NOT NULL DEFAULT 8;
-            ALTER TABLE users ADD COLUMN IF NOT EXISTS narration_voice TEXT NOT NULL DEFAULT 'Kore';
+            ALTER TABLE users ADD COLUMN IF NOT EXISTS narration_voice TEXT NOT NULL DEFAULT 'edge_en-US-AvaNeural';
             ALTER TABLE users ADD COLUMN IF NOT EXISTS voice_direction TEXT NOT NULL DEFAULT 'neutral';
             ALTER TABLE users ADD COLUMN IF NOT EXISTS default_story_minutes REAL NOT NULL DEFAULT 2;
             ALTER TABLE users ADD COLUMN IF NOT EXISTS paystack_customer_code TEXT NOT NULL DEFAULT '';
@@ -238,7 +238,7 @@ def initialize() -> None:
             ALTER TABLE users ADD COLUMN IF NOT EXISTS storage_limit_bytes BIGINT NOT NULL DEFAULT 1073741824;
             ALTER TABLE users ALTER COLUMN monthly_job_limit SET DEFAULT 0;
             ALTER TABLE users ALTER COLUMN max_minutes_per_job SET DEFAULT 5;
-            ALTER TABLE jobs ADD COLUMN IF NOT EXISTS narration_voice TEXT NOT NULL DEFAULT 'Kore';
+            ALTER TABLE jobs ADD COLUMN IF NOT EXISTS narration_voice TEXT NOT NULL DEFAULT 'edge_en-US-AvaNeural';
             ALTER TABLE jobs ADD COLUMN IF NOT EXISTS voice_direction TEXT NOT NULL DEFAULT 'neutral';
             ALTER TABLE jobs ADD COLUMN IF NOT EXISTS max_images INTEGER NOT NULL DEFAULT 8;
             ALTER TABLE jobs ADD COLUMN IF NOT EXISTS owner_job_number INTEGER;
@@ -253,6 +253,16 @@ def initialize() -> None:
             ALTER TABLE jobs ADD COLUMN IF NOT EXISTS script_mode TEXT NOT NULL DEFAULT 'ai';
             ALTER TABLE jobs ADD COLUMN IF NOT EXISTS provided_script TEXT NOT NULL DEFAULT '';
             ALTER TABLE jobs ALTER COLUMN youtube_privacy SET DEFAULT 'public';
+            ALTER TABLE users ALTER COLUMN narration_voice SET DEFAULT 'edge_en-US-AvaNeural';
+            ALTER TABLE jobs ALTER COLUMN narration_voice SET DEFAULT 'edge_en-US-AvaNeural';
+            UPDATE users SET narration_voice='edge_en-US-AvaNeural'
+            WHERE narration_voice NOT LIKE 'edge_en-%';
+            UPDATE jobs SET narration_voice='edge_en-US-AvaNeural'
+            WHERE narration_voice NOT LIKE 'edge_en-%';
+            UPDATE users SET voice_direction='neutral'
+            WHERE voice_direction NOT IN ('neutral','youthful','mature','deep','warm','bright');
+            UPDATE jobs SET voice_direction='neutral'
+            WHERE voice_direction NOT IN ('neutral','youthful','mature','deep','warm','bright');
             ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS paystack_customer_code TEXT NOT NULL DEFAULT '';
             ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS payment_reference TEXT NOT NULL DEFAULT '';
             ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'paystack';

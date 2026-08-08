@@ -16,6 +16,7 @@ import json
 import os
 import re
 import hashlib
+import shutil
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -26,29 +27,37 @@ from google import genai
 from google.genai import errors as genai_errors
 from google.genai import types
 
+from .ai33 import download_url, submit_multipart_task, wait_for_task
 from project_paths import IMAGES_DIR, PROJECT_ROOT, SCRIPTS_DIR
 
 
 CLOUDFLARE_MODEL = "@cf/leonardo/lucid-origin"
 FAST_IMAGE_MODEL = "@cf/black-forest-labs/flux-1-schnell"
+AI33_IMAGE_MODEL = "bytedance-seedream-4.5"
 WORDS_PER_SCENE = 50  # roughly six images per two minutes at 150 words/minute
 DEFAULT_MAX_STORY_IMAGES = 48
 MAX_RETRIES = 5
 RETRY_BASE_DELAY = 10  # seconds, doubles each retry
 
 STYLE_SUFFIX = (
-    ", polished professional storytelling image, coherent anatomy and perspective, "
-    "clear focal subject, layered foreground and background depth, intentional lighting, "
-    "native cinematic 16:9 composition, no text, no watermark, no logo, high detail"
+    ", high-quality colorful animated storybook cartoon, clearly illustrated and stylized, "
+    "expressive readable characters, clean shapes, coherent cartoon anatomy and perspective, "
+    "layered foreground and background depth, intentional cinematic lighting, native 16:9 "
+    "composition, absolutely no photography, photorealism, live-action person, text, watermark, "
+    "logo, collage, or border, polished animation-film detail"
 )
 SCENE_PLAN_FILENAME = "scene_plan.json"
 IMAGE_REVIEW_FILENAME = "image_review.json"
 THUMBNAIL_STEM = "thumbnail_source"
-PLAN_VERSION = 5
+PLAN_VERSION = 6
 
 
 class ImageBudgetExceeded(RuntimeError):
     """Raised before paid generation when required story visuals exceed the cap."""
+
+
+class CloudflareAllocationExhausted(RuntimeError):
+    """Raised when Cloudflare reports that the account allowance is exhausted."""
 
 
 def split_narrative_segments(text: str) -> list[dict]:
@@ -101,9 +110,6 @@ def materialize_scenes(raw_scenes: object, segments: list[dict]) -> list[dict]:
         prompt = str(raw.get("prompt", "")).strip()
         if not prompt:
             raise ValueError("Every story scene needs an image prompt")
-        direction = raw.get("direction")
-        if not isinstance(direction, dict):
-            direction = {}
         reuse_scene_id = raw.get("reuse_scene_id")
         if reuse_scene_id is not None:
             reuse_scene_id = str(reuse_scene_id).strip() or None
@@ -129,9 +135,9 @@ def materialize_scenes(raw_scenes: object, segments: list[dict]) -> list[dict]:
                 "reuse_scene_id": reuse_scene_id,
                 "prompt": prompt[:900],
                 "direction": {
-                    "camera": direction.get("camera", "slow_push"),
-                    "transition": direction.get("transition", "fade"),
-                    "atmosphere": direction.get("atmosphere", "none"),
+                    "camera": "static",
+                    "transition": "fade",
+                    "atmosphere": "none",
                 },
             }
         )
@@ -198,9 +204,11 @@ def compile_scene_prompts(
         if not action:
             action = str(scene.get("narration", "")).strip()[:350]
         parts = []
-        medium = str(project_profile.get("visual_medium", "")).strip()
-        if medium:
-            parts.append(f"Medium: {medium}")
+        parts.append(
+            "Mandatory medium: colorful animated storybook cartoon; every person, animal, "
+            "building, object, and landscape must be visibly illustrated, never photographic "
+            "or live action"
+        )
         if identities:
             parts.append(f"Characters: {' | '.join(identities)}")
         narration = str(scene.get("narration", "")).strip()
@@ -215,7 +223,7 @@ def compile_scene_prompts(
         if palette:
             parts.append(f"Color palette: {palette[:180]}")
         parts.append("Native 16:9 frame. No text, logo, watermark, collage, or border")
-        scene["prompt"] = ". ".join(parts) + "."
+        scene["prompt"] = ". ".join(parts) + STYLE_SUFFIX + "."
 
 
 def family_safe_prompt(prompt: str) -> str:
@@ -236,6 +244,44 @@ def family_safe_prompt(prompt: str) -> str:
         "characters, literal species, action, location, period, and composition. "
         f"{sanitized}"
     )
+
+
+def strengthen_thumbnail_prompt(plan: dict) -> str:
+    """Turn saved thumbnail ideas into phone-readable story-cover artwork."""
+    prompt = str(plan.get("thumbnail_prompt", "")).strip()
+    continuity = plan.get("continuity")
+    characters = continuity.get("characters", []) if isinstance(continuity, dict) else []
+    character_description = ""
+    if isinstance(characters, list):
+        for character in characters:
+            if not isinstance(character, dict):
+                continue
+            character_description = str(
+                character.get("canonical_description")
+                or character.get("description")
+                or ""
+            ).strip()
+            if character_description:
+                break
+    profile = plan.get("project_profile")
+    genre = str(profile.get("genre", "story")).strip() if isinstance(profile, dict) else "story"
+    character_rule = (
+        f"When the lead character belongs in this decisive moment, preserve this exact "
+        f"design: {character_description[:500]}. "
+        if character_description else ""
+    )
+    return (
+        f"{prompt}. Mandatory thumbnail composition: {character_rule}"
+        f"Create a 16:9 illustrated audiobook cover for this {genre} story. Show the one "
+        "character, documented event, mysterious object, destination, or discovery that best "
+        "expresses the title and central story promise. If the story has a lead character, "
+        "show them large on the right with a readable face, emotion, pose, and exact action. "
+        "For history, show an accurate participant inside the documented pivotal event. "
+        "For an object-led story, make the object dominant while keeping a relevant character "
+        "or human-scale context when truthful. Keep the left side simple and darker for the "
+        "real video title. Use a bold atmospheric story-cover composition, not a normal wide "
+        "scene, random frame, or generic portrait. No words inside the generated artwork."
+    )[:2400]
 
 
 def split_into_scenes(text: str, words_per_scene: int = WORDS_PER_SCENE) -> list[str]:
@@ -269,7 +315,7 @@ def fallback_visual_plan(scenes: list[str]) -> dict:
         "visual_bible": "Consistent cinematic storytelling artwork",
         "scene_prompts": [scene_to_prompt(scene) for scene in scenes],
         "scene_directions": [
-            {"camera": "slow_push", "transition": "fade", "atmosphere": "none"}
+            {"camera": "static", "transition": "fade", "atmosphere": "none"}
             for _scene in scenes
         ],
         "sound_cues": [],
@@ -382,6 +428,11 @@ def create_dynamic_visual_plan(
         f"{item['id']}. {item['text']}" for item in segments
     )
     prompt = f"""Act as the storyboard director for an original narrated YouTube story.
+First classify the narration as factual or fictional. For factual history, invention, origin,
+science, archaeology, biography, or documentary narration, use only people, objects, places,
+actions, dates, and uncertainty stated in the narration. Never invent a protagonist, inventor,
+experiment, witness, conflict, or event to create a character arc. Build visual progression
+from evidence, operation, chronology, comparison, change, and documented consequences.
 Divide the narration into visual scenes based only on meaningful story events, not a fixed
 word count or images-per-minute ratio. Start a new visual when the action, location, time,
 important character, emotion, clue, discovery, decision, or story direction changes. Keep a
@@ -407,13 +458,12 @@ closest suitable earlier visual with a different camera movement when a new paid
 exceed the limit. Never report the budget as insufficient. A scene may reuse an earlier image
 by setting reuse_scene_id to that earlier ID.
 
-The creator's niche is {niche or 'general storytelling'}.
-The target audience is {audience or 'infer it from the narration'}.
-The creator's preferred visual direction is {preferred_style}. Honor it when it suits the
-story and audience, while keeping age and safety appropriate. Use this context and choose
-a fitting coherent visual medium: realistic cinema for adult
-realistic stories, age-appropriate 2D or 3D animation for children, historical realism,
-fantasy illustration, gentle gothic suspense, nature documentary, or another suitable style.
+The visual medium is mandatory for this product: high-quality colorful animated storybook
+cartoon artwork for every story, audience, and genre. Humans must look like clearly stylized
+animated characters, never photographs or live-action actors. Animals, buildings, landscapes,
+historical events, and scientific subjects must use the same coherent illustrated world.
+Adapt costumes, facts, mood, palette, and cartoon rendering to the exact story, but never
+switch to photorealism, realistic cinema, documentary photography, or photographic portraits.
 Never imitate a named artist, studio, franchise, or copyrighted character.
 
 Make this video visually distinct from a generic AI story. Derive its cast, locations,
@@ -461,12 +511,9 @@ setting, camera distance, composition, and lighting without changing locked deta
 Generate native cinematic 16:9 compositions with important subjects in a central safe area,
 no words, letters, logos, watermark, collage, frame, gore, or nudity.
 
-Choose continuous, restrained camera movement so no image feels frozen. Use slow_push or
-slow_pull for intimate or still moments, pan_left or pan_right for journeys and horizontal
-action, and pan_up or pan_down for tall buildings, trees, mountains, skies, or reveals.
-Match scene changes: use dissolve when the subject or location continues, smooth_left or
-smooth_right when travel or action continues, and fade only for a real change in time or
-place. The outgoing image must keep moving while the incoming image replaces it smoothly.
+Every image must remain completely still. Do not plan zooms, pans, shakes, slides, animated
+weather, particles, or camera movement. Every scene change uses only a soft fade from the
+outgoing still image into the incoming still image.
 Select sparse sound cues only for visible or strongly implied events; use stable scene_id
 values. Never create whooshes, swipes, impacts, or other sounds for visual transitions.
 
@@ -488,12 +535,16 @@ Design three separate high-performing YouTube thumbnail concepts, then score eac
 10 for truthful curiosity, phone-size readability, emotional clarity, and title alignment.
 Select the highest useful total rather than the most dramatic concept. Each concept must make one specific,
 unanswered story question instantly visible while remaining completely honest to the video.
-Use one large, emotionally readable person, place, or object on the right third; one unusual
-but truthful visual detail that creates curiosity; strong warm-versus-cool color contrast;
+Use one large, emotionally readable main character on the right third, occupying roughly half
+the frame, with clear eyes, face, pose, and story-specific action. For factual history without
+a named protagonist, show one prominent historically accurate participant in the documented
+event without claiming a false identity. Use a place or object alone only when the story truly
+has no living character. Include one unusual but truthful visual detail that creates curiosity;
+strong warm-versus-cool color contrast;
 and a simple background with clean darker space on the left for added text. The subject and
 curiosity detail must still be clear at phone size. Do not create a collage, crowded scene,
 tiny subject, generic landscape, fake danger, misleading reaction, arrow, circle, logo, or
-words inside the generated image. For history, show a recognisable person, object, decision,
+words inside the generated image. For history, show a recognisable participant or decision,
 or disputed moment without inventing facts. For sleep stories, show a safe but irresistible
 place, arrival, light, doorway, train, room, or discovery without horror.
 
@@ -514,10 +565,8 @@ Return JSON only with:
 - visual_bible: concise string
 - scenes: ordered objects with start_segment, end_segment, beat, action, characters (IDs),
   location (ID or empty), importance (mandatory or continuity), reuse_scene_id (earlier
-  scene_### or null), prompt, and direction containing camera (slow_push, slow_pull,
-  pan_left, pan_right, pan_up, pan_down), transition (fade, dissolve, smooth_left,
-  smooth_right), and
-  atmosphere (none, stars, rain, snow, embers, fog, motes)
+  scene_### or null), prompt, and direction containing camera (static), transition (fade),
+  and atmosphere (none)
 - sound_cues: sparse objects with scene_id, position (0 to 1), prompt, duration_seconds
   (0.5 to 4), volume (0.04 to 0.16), and kind
 - retention_checkpoints: ordered objects with scene_id, role, viewer_question, and visual_change
@@ -654,12 +703,17 @@ def create_visual_plan(
         f"{index}. {scene[:700]}" for index, scene in enumerate(scenes, start=1)
     )
     prompt = f"""Act as a senior art director and editor for an original narrated story.
-First infer the intended audience, genre, emotional tone, and best visual medium from the
-actual story. Do not force photorealism: choose cinematic live action for realistic adult
-stories, age-appropriate 2D/3D animation for children, graphic-novel or gothic illustration
-for suitable suspense, historically grounded realism for history, or another coherent medium
-when it genuinely fits. Never imitate a named living artist, studio, franchise, or copyrighted
-character.
+First infer the intended audience, genre, and emotional tone from the actual story. The visual
+plan must also distinguish factual explanation from fiction. A factual invention, origin,
+history, science, archaeology, biography, or documentary video must never gain an invented
+protagonist, inventor, witness, experiment, conflict, or event. Show only supported evidence,
+operation, chronology, comparison, uncertainty, and documented consequences.
+medium is fixed: high-quality colorful animated storybook cartoon artwork. Every human must be
+a clearly stylized animated character, never a photograph or live-action actor. Render animals,
+history, science, environments, props, and thumbnails inside one coherent illustrated world.
+Change the palette, period detail, mood, and cartoon treatment to fit the story, but never use
+photorealism, cinematic live action, documentary photography, or photographic portraits.
+Never imitate a named living artist, studio, franchise, or copyrighted character.
 
 Create a project profile, visual continuity bible, one image prompt and one restrained editing
 direction for every numbered narration scene, a sparse sound cue sheet, plus one separate
@@ -675,7 +729,10 @@ showing one strange clue, unexpected discovery, expressive reaction, looming que
 unresolved moment without revealing the answer. Use a bold, colorful complementary palette,
 bright focal lighting, deep contrast, clean shapes, and one instantly readable subject. Keep it
 vivid and inviting rather than muddy, grey, overly serious, frightening, or visually busy.
-Place the focal subject on the right and leave clean darker space on the left for headline text.
+Place one large main character or historically accurate participant on the right, with a clear
+face, emotion, and story action, and leave clean darker space on the left for headline text.
+The character should occupy roughly half the frame and remain readable on a phone. Use an
+object or place alone only when the story has no living character.
 Do not put words, letters, logos, watermarks, frames, split screens, collages, gore, nudity, or
 copyrighted characters in any prompt.
 
@@ -700,8 +757,7 @@ Return JSON only with:
 - visual_bible: a concise string
 - scene_prompts: an array of exactly {len(scenes)} detailed strings in scene order
 - scene_directions: an array of exactly {len(scenes)} objects, each containing camera
-  (slow_push, slow_pull, pan_left, pan_right, pan_up, or pan_down), transition (fade, dissolve, smooth_left,
-  or smooth_right), and atmosphere (none, stars, rain, snow, embers, fog, or motes)
+  (static), transition (fade), and atmosphere (none)
 - sound_cues: a sparse array of objects containing scene_index (1-based), position (a number
   from 0 to 1 within that scene), prompt (a concise sound-only description), duration_seconds
   (0.5 to 4.0), volume (0.04 to 0.16), and kind (action or environment)
@@ -755,7 +811,7 @@ def request_image(
         "https://api.cloudflare.com/client/v4/accounts/"
         f"{account_id}/ai/run/{model}"
     )
-    parameters = {"prompt": prompt}
+    parameters = {"prompt": prompt[:2048] if model == FAST_IMAGE_MODEL else prompt}
     if model == FAST_IMAGE_MODEL:
         parameters["steps"] = 4
     else:
@@ -804,7 +860,7 @@ def request_image(
     raise RuntimeError("Cloudflare returned an unsupported image format.")
 
 
-def generate_image(
+def generate_image_with_model(
     account_id: str, api_token: str, prompt: str, model: str, seed: int | None = None
 ) -> tuple[bytes, str]:
     last_error = None
@@ -819,11 +875,11 @@ def generate_image(
             if len(details) > 500:
                 details = details[:500] + "..."
             if exc.code == 429 and (
-                '"code":4006' in details or "daily free allocation" in details
+                re.search(r'"code"\s*:\s*4006', details)
+                or "daily free allocation" in details.lower()
             ):
-                raise RuntimeError(
-                    "Cloudflare Workers AI daily allocation is exhausted. "
-                    "Retry after the daily reset or enable Workers Paid."
+                raise CloudflareAllocationExhausted(
+                    f"Cloudflare allocation is exhausted for {model}."
                 ) from exc
             if exc.code == 400 and "NSFW content" in details and not used_safety_fallback:
                 active_prompt = family_safe_prompt(prompt)
@@ -843,8 +899,81 @@ def generate_image(
         time.sleep(delay)
 
     raise RuntimeError(
-        f"Failed to generate image after {MAX_RETRIES} attempts."
+        f"Failed to generate an image with {model} after {MAX_RETRIES} attempts."
     ) from last_error
+
+
+def generate_ai33_image(api_key: str, prompt: str, model: str) -> tuple[bytes, str]:
+    """Generate one native 16:9 image with the verified AI33 Imagen endpoint."""
+    task_id = submit_multipart_task(
+        api_key,
+        "/v1i/task/generate-image",
+        {
+            "prompt": prompt[:4000],
+            "model_id": model,
+            "generations_count": "1",
+            "model_parameters": json.dumps(
+                {"aspect_ratio": "16:9", "resolution": "2K"}
+            ),
+        },
+    )
+    task = wait_for_task(api_key, task_id)
+    metadata = task.get("metadata") if isinstance(task.get("metadata"), dict) else {}
+    results = metadata.get("result_images")
+    if not isinstance(results, list) or not results or not isinstance(results[0], dict):
+        raise RuntimeError("AI33.Pro completed image generation without an image.")
+    result = results[0]
+    image_url = result.get("imageUrl") or result.get("previewUrl")
+    if not isinstance(image_url, str):
+        raise RuntimeError("AI33.Pro returned an invalid image URL.")
+    image_data = download_url(image_url)
+    if image_data.startswith(b"\xff\xd8\xff"):
+        return image_data, ".jpg"
+    if image_data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return image_data, ".png"
+    raise RuntimeError("AI33.Pro returned an unsupported image format.")
+
+
+def generate_image(
+    account_id: str,
+    api_token: str,
+    prompt: str,
+    fallback_model: str,
+    seed: int | None = None,
+    free_model: str = FAST_IMAGE_MODEL,
+) -> tuple[bytes, str]:
+    """Try AI33.Pro first, then the two Cloudflare fallbacks."""
+    ai33_api_key = os.getenv("AI33_API_KEY", "").strip()
+    if ai33_api_key:
+        try:
+            return generate_ai33_image(ai33_api_key, prompt, AI33_IMAGE_MODEL)
+        except RuntimeError as exc:
+            print(f"    AI33.Pro image was unavailable ({exc}); trying Cloudflare.")
+
+    models = list(dict.fromkeys((free_model, fallback_model)))
+    first_error: Exception | None = None
+    for index, model in enumerate(models):
+        try:
+            return generate_image_with_model(
+                account_id, api_token, prompt, model, seed
+            )
+        except (CloudflareAllocationExhausted, RuntimeError) as exc:
+            if first_error is None:
+                first_error = exc
+            if index + 1 < len(models):
+                print(
+                    f"    {model} was unavailable ({exc}); "
+                    f"trying {models[index + 1]}."
+                )
+                continue
+            if isinstance(exc, CloudflareAllocationExhausted):
+                raise RuntimeError(
+                    "Cloudflare Workers AI allocation is exhausted. The standard "
+                    "image model was also unavailable. Retry after the daily reset "
+                    "or enable Workers Paid."
+                ) from exc
+            raise
+    raise RuntimeError("Cloudflare image generation failed.") from first_error
 
 
 def image_file(path: Path) -> Path | None:
@@ -867,8 +996,10 @@ def review_image_batch(
         "Fail only for a severe visible problem: blank or nearly black output, unrelated "
         "subject, wrong species or character type, a non-human character replaced by a "
         "human, wrong story action or location, accidental text or logo, badly broken "
-        "anatomy, missing main subject, or "
-        "framing that hides the important action. Style preference alone is not a failure. "
+        "anatomy, missing main subject, framing that hides the important action, or any "
+        "photographic, photorealistic, or live-action appearance instead of the mandatory "
+        "colorful animated storybook cartoon medium. Minor differences within cartoon styles "
+        "are acceptable. "
         "Return JSON only with a reviews array. Each review needs id, passed, confidence "
         "from 0 to 1, and one short correction."
     ))]
@@ -956,7 +1087,9 @@ def review_and_repair_images(
                 print(f"  Regenerating weak {item_id}: {correction or 'severe visual issue'}")
                 repair_prompt = (
                     f"{prompts[item_id]} Correct this severe issue: {correction}. "
-                    "Keep the intended characters, action, setting, palette, and native 16:9 framing."
+                    "Keep the intended characters, action, setting, palette, and native 16:9 "
+                    "framing. The result must be a clearly illustrated colorful animated "
+                    "storybook cartoon, never photographic or live action."
                 )
                 repair_seed = story_seed + int(
                     hashlib.sha256(item_id.encode()).hexdigest()[:6], 16
@@ -1079,18 +1212,28 @@ def main() -> None:
 
     account_id = os.getenv("CLOUDFLARE_ACCOUNT_ID")
     api_token = os.getenv("CLOUDFLARE_API_TOKEN")
+    free_image_model = os.getenv(
+        "CLOUDFLARE_FREE_IMAGE_MODEL", FAST_IMAGE_MODEL
+    ).strip()
     image_model = os.getenv("CLOUDFLARE_IMAGE_MODEL", CLOUDFLARE_MODEL).strip()
     if not account_id or not api_token:
         raise SystemExit(
             "Cloudflare credentials were not found. Add CLOUDFLARE_ACCOUNT_ID "
             "and CLOUDFLARE_API_TOKEN to .env."
         )
-    if image_model not in {CLOUDFLARE_MODEL, FAST_IMAGE_MODEL}:
+    if free_image_model != FAST_IMAGE_MODEL:
         raise SystemExit(
-            "CLOUDFLARE_IMAGE_MODEL must be @cf/leonardo/lucid-origin or "
+            "CLOUDFLARE_FREE_IMAGE_MODEL must be "
             "@cf/black-forest-labs/flux-1-schnell."
         )
-    print(f"Image model: {image_model}")
+    if image_model != CLOUDFLARE_MODEL:
+        raise SystemExit(
+            "CLOUDFLARE_IMAGE_MODEL must be @cf/leonardo/lucid-origin."
+        )
+    print(
+        f"Image models: AI33.Pro {AI33_IMAGE_MODEL} first, then "
+        f"{free_image_model}, then {image_model}"
+    )
 
     text = script_path.read_text(encoding="utf-8")
     if not text.strip():
@@ -1126,6 +1269,7 @@ def main() -> None:
         args.niche,
         args.audience,
     )
+    visual_plan["thumbnail_prompt"] = strengthen_thumbnail_prompt(visual_plan)
     if args.plan_only:
         print(f"Storyboard ready for review: {plan_path}")
         return
@@ -1148,7 +1292,7 @@ def main() -> None:
         f"{distinct_count} distinct images."
     )
 
-    def ensure_thumbnail_source() -> None:
+    def ensure_thumbnail_source() -> Path:
         existing_thumbnail = next(
             (
                 image_dir / f"{THUMBNAIL_STEM}{suffix}"
@@ -1159,7 +1303,7 @@ def main() -> None:
         )
         if existing_thumbnail:
             print("  Dedicated thumbnail source already done, skipping.")
-            return
+            return existing_thumbnail
         print("  Generating dedicated thumbnail source...")
         thumbnail_data, thumbnail_suffix = generate_image(
             account_id,
@@ -1172,9 +1316,10 @@ def main() -> None:
         temporary_path = image_dir / f"{THUMBNAIL_STEM}.generating{thumbnail_suffix}"
         temporary_path.write_bytes(thumbnail_data)
         temporary_path.replace(thumbnail_path)
+        return thumbnail_path
 
     if args.thumbnail_only:
-        ensure_thumbnail_source()
+        thumbnail_source = ensure_thumbnail_source()
         review_and_repair_images(
             image_dir=image_dir,
             scenes=scene_entries,
@@ -1185,6 +1330,20 @@ def main() -> None:
             image_model=image_model,
             story_seed=story_seed,
             include_scenes=False,
+        )
+        from .video import render_thumbnail
+
+        ffmpeg_path = shutil.which("ffmpeg")
+        if not ffmpeg_path:
+            raise SystemExit("ffmpeg is required to prepare the thumbnail preview.")
+        thumbnail_source = image_file(image_dir / THUMBNAIL_STEM) or thumbnail_source
+        render_thumbnail(
+            ffmpeg_path,
+            [thumbnail_source],
+            thumbnail_source,
+            args.title,
+            script_path.stem,
+            str(visual_plan.get("thumbnail_hook", "")),
         )
         print(f"Thumbnail ready for review in {image_dir}")
         return

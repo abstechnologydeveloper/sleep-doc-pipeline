@@ -21,7 +21,7 @@ class Plan:
 PLANS = {
     "free": Plan(
         "free", "Free", 0, 0, 0, 5, 8, 1,
-        "Explore the workspace and prepare your video recipe before you pay.",
+        "Explore the workspace and plan your first video before you pay.",
         "People who want to browse the tools and plan their videos.",
         "View the workspace and edit your settings. Video creation requires a paid plan.",
     ),
@@ -48,48 +48,24 @@ PLANS = {
 PAID_PLAN_KEYS = ("basic", "pro", "studio")
 PLAN_RANK = {"free": 0, "basic": 1, "pro": 2, "studio": 3}
 
-# Google Gemini prebuilt TTS voices. Voice direction is selected separately
-# because the named voices are officially described by tone, not gender.
+# Verified provider-prefixed AI33.Pro voice IDs sent to the narration API.
+DEFAULT_NARRATION_VOICE = "edge_en-US-AvaNeural"
 VOICE_OPTIONS = {
-    "Zephyr": "Zephyr — bright",
-    "Puck": "Puck — upbeat",
-    "Charon": "Charon — informative",
-    "Kore": "Kore — firm",
-    "Fenrir": "Fenrir — excited",
-    "Leda": "Leda — youthful",
-    "Orus": "Orus — firm",
-    "Aoede": "Aoede — light and breezy",
-    "Callirrhoe": "Callirrhoe — easy-going",
-    "Autonoe": "Autonoe — bright",
-    "Enceladus": "Enceladus — breathy",
-    "Iapetus": "Iapetus — clear",
-    "Umbriel": "Umbriel — easy-going",
-    "Algieba": "Algieba — smooth",
-    "Despina": "Despina — smooth",
-    "Erinome": "Erinome — clear",
-    "Algenib": "Algenib — rough and deep",
-    "Rasalgethi": "Rasalgethi — informative",
-    "Laomedeia": "Laomedeia — upbeat",
-    "Achernar": "Achernar — soft",
-    "Alnilam": "Alnilam — firm",
-    "Schedar": "Schedar — even",
-    "Gacrux": "Gacrux — mature",
-    "Pulcherrima": "Pulcherrima — direct",
-    "Achird": "Achird — friendly",
-    "Zubenelgenubi": "Zubenelgenubi — casual",
-    "Vindemiatrix": "Vindemiatrix — gentle",
-    "Sadachbia": "Sadachbia — lively",
-    "Sadaltager": "Sadaltager — knowledgeable",
-    "Sulafat": "Sulafat — warm",
+    "edge_en-US-AvaNeural": "Ava — natural American female narrator",
+    "edge_en-US-EmmaNeural": "Emma — warm American female narrator",
+    "edge_en-GB-SoniaNeural": "Sonia — clear British female narrator",
+    "edge_en-US-AndrewNeural": "Andrew — natural American male narrator",
+    "edge_en-US-BrianNeural": "Brian — steady American male narrator",
+    "edge_en-GB-RyanNeural": "Ryan — clear British male narrator",
+    "edge_en-NG-EzinneNeural": "Ezinne — Nigerian female narrator",
+    "edge_en-NG-AbeoNeural": "Abeo — Nigerian male narrator",
 }
 
 VOICE_DIRECTIONS = {
-    "neutral": "Natural / no preference",
-    "masculine": "More masculine",
-    "feminine": "More feminine",
+    "neutral": "Natural",
     "youthful": "Youthful",
     "mature": "Mature",
-    "deep": "Deep",
+    "deep": "Deep and steady",
     "warm": "Warm",
     "bright": "Bright",
 }

@@ -276,6 +276,8 @@ def page_context(request: Request, section: str, **values) -> dict:
         "csrf": csrf_token(request),
         "current_user": user,
         "is_admin": is_admin(user),
+        "voice_options": VOICE_OPTIONS,
+        "voice_directions": VOICE_DIRECTIONS,
         "session_accounts": available_session_accounts(request),
         **values,
     }
@@ -316,13 +318,22 @@ def creator_job_error(error: str | None) -> str:
         return "Your storage is full. Delete an old video or choose a larger plan, then retry."
     if "daily allocation" in detail or "daily limit" in detail or "quota" in detail:
         return "An AI service reached its usage limit. Please retry later."
+    if (
+        "invalid_api_key" in detail
+        or "api key id used as api key" in detail
+        or "not a usable secret key" in detail
+    ):
+        return (
+            "Narration is not configured correctly. The AI33.Pro key must be "
+            "replaced before this video can continue."
+        )
     if "ffmpeg" in detail or "assembling" in detail or "render" in detail:
         return "The final video could not be assembled. Your saved work can be retried."
     if "audio" in detail or "voice" in detail or "tts" in detail:
         return "The narration could not be completed. Please retry the video."
     if "image" in detail or "cloudflare" in detail or "storyboard" in detail:
         return "One or more story pictures could not be completed. Please retry the video."
-    if "elevenlabs" in detail or "sound request" in detail:
+    if "ai33.pro" in detail or "sound request" in detail:
         return "Optional sound effects were unavailable, but they should not stop the video. Please retry."
     if "incomplete narration" in detail or "quality check" in detail:
         return "The story was incomplete, so it was stopped instead of creating a poor video. Please retry."
@@ -823,6 +834,7 @@ def dashboard(request: Request):
             jobs=database.list_jobs(limit=8, owner_id=user_id, include_all=include_all),
             media_items=reusable_media(request)[:4],
             connectors=connectors,
+            voice_options=VOICE_OPTIONS,
             storage_usage=None if include_all else creator_storage(user),
             creator_setup=None if include_all else {
                 "has_video": summary["total"] > 0,
@@ -1738,6 +1750,7 @@ def cleanup_local_review_files(job) -> None:
         script_path.with_suffix(".fact-check.md"),
         AUDIO_DIR / f"{stem}.wav",
         AUDIO_DIR / f"{stem}.timings.json",
+        AUDIO_DIR / f"{stem}.transcript.srt",
         VIDEOS_DIR / f"{stem}.mp4",
         VIDEOS_DIR / f"{stem}.srt",
         VIDEOS_DIR / f"{stem}.quality.json",
@@ -1850,6 +1863,9 @@ async def regenerate_job_review(request: Request, job_id: int):
         )
         (AUDIO_DIR / f"{stem}.wav").unlink(missing_ok=True)
         (AUDIO_DIR / f"{stem}.timings.json").unlink(missing_ok=True)
+        (AUDIO_DIR / f"{stem}.transcript.srt").unlink(missing_ok=True)
+        for chunk_dir in AUDIO_DIR.glob(f"{stem}_ai33_*_chunks"):
+            shutil.rmtree(chunk_dir, ignore_errors=True)
     elif stage == "sounds":
         shutil.rmtree(SOUNDS_DIR / stem, ignore_errors=True)
     elif stage == "rough":
@@ -2201,6 +2217,7 @@ def admin_customer_detail(request: Request, user_id: int):
         request, "admin_customer_detail.html",
         page_context(
             request, "customers", customer=customer, plans=PLANS,
+            voice_options=VOICE_OPTIONS,
             jobs=database.list_jobs(limit=50, owner_id=user_id),
             payments=database.payment_history(user_id, limit=50),
             usage=database.monthly_job_usage(user_id),

@@ -1,23 +1,22 @@
 #!/usr/bin/env python3
-"""Generate optional, sparse story sound effects with ElevenLabs."""
+"""Generate optional, sparse story sound effects with AI33.Pro."""
 
 import argparse
 import json
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from urllib import error, request
-
 from dotenv import load_dotenv
 
+from .ai33 import submit_json_task, wait_for_audio
 from project_paths import IMAGES_DIR, PROJECT_ROOT, SCRIPTS_DIR, SOUNDS_DIR
 
 
-API_URL = "https://api.elevenlabs.io/v1/sound-generation"
 MODEL_ID = "eleven_text_to_sound_v2"
 MANIFEST_FILENAME = "sound_manifest.json"
 MAX_SOUND_CUES = 30
 AMBIENCE_FILENAME = "ambience.mp3"
+MUSIC_FILENAME = "background_music.mp3"
 AMBIENCE_SECONDS = 12.0
 AMBIENCE_RULES = (
     (("rain", "storm", "drizzle"), "steady gentle rain outside, seamless calm ambience, no thunder, no music, no voices"),
@@ -129,56 +128,64 @@ def select_ambience(
 
 
 def generate_sound(api_key: str, cue: dict) -> bytes:
-    body = json.dumps(
+    task_id = submit_json_task(
+        api_key,
+        "/v1/task/sound-effect",
         {
             "text": cue["prompt"],
             "duration_seconds": cue["duration_seconds"],
             "prompt_influence": 0.35,
-            "loop": False,
+            "loop": cue.get("kind") == "continuous_ambience",
             "model_id": MODEL_ID,
-        }
-    ).encode("utf-8")
-    api_request = request.Request(
-        API_URL,
-        data=body,
-        method="POST",
-        headers={
-            "xi-api-key": api_key,
-            "Content-Type": "application/json",
-            "Accept": "audio/mpeg",
-            "User-Agent": "sleep-doc-pipeline/1.0",
         },
     )
-    try:
-        with request.urlopen(api_request, timeout=180) as response:
-            audio = response.read()
-    except error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="replace")[:500]
-        raise RuntimeError(
-            f"ElevenLabs rejected the sound request ({exc.code}): {detail}"
-        ) from exc
-    except (error.URLError, TimeoutError) as exc:
-        raise RuntimeError(f"ElevenLabs sound request failed: {exc}") from exc
-    if not audio:
-        raise RuntimeError("ElevenLabs returned an empty sound effect.")
-    return audio
+    return wait_for_audio(api_key, task_id)
+
+
+def select_music(plan: dict, title: str) -> dict:
+    """Create one restrained instrumental brief from the approved story plan."""
+    profile = plan.get("project_profile", {})
+    profile_text = json.dumps(profile, ensure_ascii=False)
+    prompt = (
+        f"Instrumental background score for a narrated animated story titled {title}. "
+        f"Story direction: {profile_text[:240]}. Gentle cinematic support for spoken "
+        "narration, memorable but unobtrusive, no vocals, no lyrics, no sudden loud hits, "
+        "no frightening sounds, smooth beginning and ending."
+    )
+    return {
+        "filename": MUSIC_FILENAME,
+        "prompt": prompt[:500],
+        "volume": 0.045,
+        "kind": "background_music",
+    }
+
+
+def generate_music(api_key: str, music: dict) -> bytes:
+    task_id = submit_json_task(
+        api_key,
+        "/v1s/task/music-generation",
+        {
+            "create_mode": "simple",
+            "gpt_description_prompt": music["prompt"],
+            "make_instrumental": True,
+        },
+    )
+    return wait_for_audio(api_key, task_id)
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Generate optional story sound effects.")
     parser.add_argument("script_path", nargs="?")
+    parser.add_argument("--title", default="", help="Approved video title")
     args = parser.parse_args()
     script_path = select_script(args.script_path)
     if not script_path.is_file():
         raise SystemExit(f"Script file not found: {script_path}")
 
     load_dotenv(PROJECT_ROOT / ".env", override=True)
-    api_key = os.getenv("ELEVENLABS_API_KEY", "").strip()
+    api_key = os.getenv("AI33_API_KEY", "").strip()
     if not api_key:
-        print("Sound design skipped: ELEVENLABS_API_KEY is not configured.")
-        return
-    if not api_key.startswith("sk_"):
-        print("Sound design skipped: ELEVENLABS_API_KEY has an unsupported format.")
+        print("Sound design skipped: AI33_API_KEY is not configured.")
         return
 
     plan_path = IMAGES_DIR / script_path.stem / "scene_plan.json"
@@ -190,7 +197,7 @@ def main() -> None:
     except (OSError, json.JSONDecodeError) as exc:
         raise SystemExit(f"Could not read scene plan: {exc}") from exc
 
-    if plan.get("version") in {2, 3, 4, 5} and isinstance(plan.get("scenes"), list):
+    if isinstance(plan.get("scenes"), list):
         scene_ids = [str(scene.get("id", "")) for scene in plan["scenes"]]
     else:
         scene_ids = [
@@ -198,12 +205,13 @@ def main() -> None:
             for index in range(1, len(plan.get("scene_prompts", [])) + 1)
         ]
     cues = normalized_cues(plan.get("sound_cues"), scene_ids)
+    music = select_music(plan, args.title or script_path.stem.replace("-", " "))
     ambience = select_ambience(
         script_path.read_text(encoding="utf-8"),
         plan.get("project_profile", {}),
         plan.get("continuous_ambience"),
     )
-    if not cues and not ambience:
+    if not cues and not ambience and not music:
         print("Sound design skipped: no useful sound moments or ambience were selected.")
         return
 
@@ -269,9 +277,30 @@ def main() -> None:
                 temporary_path.unlink(missing_ok=True)
                 print(f"  Warning: continuous ambience was skipped ({exc})")
 
+    completed_music = None
+    music_path = output_dir / MUSIC_FILENAME
+    if music_path.is_file() and music_path.stat().st_size > 0:
+        print("  Instrumental background music already done, skipping.")
+        completed_music = music
+    else:
+        print("  Generating instrumental background music...")
+        temporary_path = music_path.with_suffix(".generating.mp3")
+        try:
+            temporary_path.write_bytes(generate_music(api_key, music))
+            temporary_path.replace(music_path)
+            completed_music = music
+        except (OSError, RuntimeError) as exc:
+            temporary_path.unlink(missing_ok=True)
+            print(f"  Warning: background music was skipped ({exc})")
+
     (output_dir / MANIFEST_FILENAME).write_text(
         json.dumps(
-            {"cues": completed_cues, "ambience": completed_ambience}, indent=2
+            {
+                "cues": completed_cues,
+                "ambience": completed_ambience,
+                "music": completed_music,
+            },
+            indent=2,
         ),
         encoding="utf-8",
     )

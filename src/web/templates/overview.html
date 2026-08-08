@@ -31,7 +31,7 @@
     {% include '_job_table.html' %}
   </section>
   <section class="panel">
-    {% if is_admin %}<div class="section-heading"><div><h2>Quick actions</h2><p>Manage customers or review payments.</p></div></div><div class="action-row"><a class="button secondary" href="/admin/customers">Customers</a><a class="button secondary" href="/admin/payments">Payments</a></div>{% else %}<div class="section-heading"><div><h2>Your defaults</h2><p>These set the starting voice and length, not the story or pictures.</p></div><a href="/settings">Edit</a></div><dl class="recipe-list"><dt>Channel</dt><dd>{{ current_user.channel_name or 'Not set' }}</dd><dt>Voice</dt><dd>{{ current_user.voice_direction|title }} · {{ current_user.narration_voice }}</dd><dt>Length</dt><dd>{{ current_user.default_story_minutes }} minutes</dd></dl>{% endif %}
+    {% if is_admin %}<div class="section-heading"><div><h2>Quick actions</h2><p>Manage customers or review payments.</p></div></div><div class="action-row"><a class="button secondary" href="/admin/customers">Customers</a><a class="button secondary" href="/admin/payments">Payments</a></div>{% else %}<div class="section-heading"><div><h2>Your defaults</h2><p>These set the starting voice and length, not the story or pictures.</p></div><a href="/settings">Edit</a></div><dl class="recipe-list"><dt>Channel</dt><dd>{{ current_user.channel_name or 'Not set' }}</dd><dt>Voice</dt><dd>{{ voice_options.get(current_user.narration_voice, 'Ava — natural American female narrator') }}</dd><dt>Length</dt><dd>{{ current_user.default_story_minutes }} minutes</dd></dl>{% endif %}
   </section>
 </div>
 
