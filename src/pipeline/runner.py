@@ -25,6 +25,7 @@ from project_paths import (
     THUMBNAILS_DIR,
     VIDEOS_DIR,
 )
+from production_limits import MAX_VIDEO_MINUTES
 
 BASE_DIR = PROJECT_ROOT
 PIPELINE_STEPS = (
@@ -92,8 +93,8 @@ def parse_args() -> argparse.Namespace:
         parser.error("resume options cannot be combined with topic or minutes")
     if args.resume and args.resume_script:
         parser.error("--resume and --resume-script cannot be combined")
-    if args.minutes is not None and args.minutes <= 0:
-        parser.error("minutes must be greater than zero")
+    if args.minutes is not None and not 0.5 <= args.minutes <= MAX_VIDEO_MINUTES:
+        parser.error(f"minutes must be between 0.5 and {MAX_VIDEO_MINUTES}")
     if args.max_images is not None and args.max_images < 1:
         parser.error("--max-images must be at least 1")
     if args.max_images is not None and args.max_images > 48:
@@ -123,13 +124,13 @@ def prompt_for_minutes(configured_minutes: float | None) -> float:
         try:
             response = input("Desired narration duration in minutes [1]: ").strip()
             minutes = float(response) if response else 1.0
-            if minutes > 0:
+            if 0.5 <= minutes <= MAX_VIDEO_MINUTES:
                 return minutes
         except ValueError:
             pass
         except (EOFError, KeyboardInterrupt) as exc:
             raise SystemExit("\nPipeline cancelled.") from exc
-        print("Enter a number greater than zero, such as 1, 10, or 60.")
+        print(f"Enter a number from 0.5 to {MAX_VIDEO_MINUTES}.")
 
 
 def validate_environment() -> None:

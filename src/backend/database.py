@@ -8,6 +8,7 @@ import psycopg
 from psycopg.rows import dict_row
 
 from project_paths import DATA_DIR
+from production_limits import MAX_VIDEO_MINUTES
 from .plans import plan_for
 
 
@@ -302,6 +303,7 @@ def initialize() -> None:
     initialize_free_plan_no_creation()
     initialize_storage_limits()
     initialize_story_usage()
+    initialize_video_duration_cap()
     ensure_configured_accounts()
 
 
@@ -363,6 +365,27 @@ def initialize_plan_limits() -> None:
         db.execute(
             "INSERT INTO app_migrations (name, applied_at) VALUES (?, ?)",
             ("commercial_plan_limits_v1", utc_now()),
+        )
+
+
+def initialize_video_duration_cap() -> None:
+    """Clamp legacy custom account limits to the global production maximum."""
+    with connect() as db:
+        migration = "global_video_duration_cap_v1"
+        if db.execute(
+            "SELECT 1 AS present FROM app_migrations WHERE name=?", (migration,)
+        ).fetchone():
+            return
+        db.execute(
+            """UPDATE users SET
+            max_minutes_per_job=LEAST(max_minutes_per_job, ?),
+            default_story_minutes=LEAST(default_story_minutes, ?),
+            updated_at=?""",
+            (MAX_VIDEO_MINUTES, MAX_VIDEO_MINUTES, utc_now()),
+        )
+        db.execute(
+            "INSERT INTO app_migrations (name, applied_at) VALUES (?, ?)",
+            (migration, utc_now()),
         )
 
 
@@ -646,8 +669,10 @@ def create_story_job(
         ).fetchone()
         if not user or user["status"] != "active":
             return None, "Your account is not active."
-        if minutes < 0.5:
-            return None, "Duration must be at least 0.5 minutes."
+        if not 0.5 <= minutes <= MAX_VIDEO_MINUTES:
+            return None, (
+                f"Duration must be between 0.5 and {MAX_VIDEO_MINUTES} minutes."
+            )
 
         if user["role"] != "admin":
             if user["plan"] == "free":

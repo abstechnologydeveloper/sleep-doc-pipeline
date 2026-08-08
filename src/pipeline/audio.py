@@ -40,7 +40,7 @@ CHANNELS = 1
 SAMPLE_WIDTH = 2
 MAX_RETRIES = 5
 RETRY_BASE_DELAY = 5  # seconds, doubles each retry
-DEFAULT_WORKERS = 2
+DEFAULT_WORKERS = 3
 
 ChunkJob = tuple[int, str, Path]
 
