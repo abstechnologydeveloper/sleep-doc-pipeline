@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """Assemble a finished video from a script's audio and scene images.
 
-Times each image to the portion of the narration it corresponds to (based on
-word count), so images change roughly in sync with the story, then muxes in
-the narration audio track.
+Aligns each image and caption to the measured narration transcript, then muxes
+the narration audio track. Older projects fall back to measured chunk timing.
 
 Usage:
     python assemble_video.py
@@ -11,6 +10,7 @@ Usage:
 """
 
 import argparse
+from difflib import SequenceMatcher
 import hashlib
 import json
 import re
@@ -267,7 +267,22 @@ def load_background_music(script_stem: str) -> dict | None:
 def timed_scene_durations(
     scenes: list[dict], text: str, duration: float, timing_path: Path
 ) -> list[float]:
-    """Map exact story word ranges onto measured TTS chunk boundaries."""
+    """Map story scene boundaries onto the measured spoken timeline."""
+    aligned_times = speech_aligned_word_times(text, duration, timing_path)
+    if aligned_times:
+        boundaries = [0.0]
+        for scene in scenes[:-1]:
+            next_word = int(scene["end_word"])
+            if next_word >= len(aligned_times):
+                break
+            boundaries.append(aligned_times[next_word][0])
+        if len(boundaries) == len(scenes):
+            boundaries.append(duration)
+            if all(end > start for start, end in zip(boundaries, boundaries[1:])):
+                return [
+                    end - start for start, end in zip(boundaries, boundaries[1:])
+                ]
+
     word_times: list[tuple[float, float]] = []
     if timing_path.is_file():
         try:
@@ -315,32 +330,113 @@ def srt_timestamp(seconds: float) -> str:
     return f"{hours:02d}:{minutes:02d}:{whole_seconds:02d},{milliseconds:03d}"
 
 
+def transcript_path_for(timing_path: Path) -> Path:
+    return timing_path.with_name(
+        timing_path.name.replace(".timings.json", ".transcript.srt")
+    )
+
+
+def parse_speech_transcript(
+    transcript_path: Path, duration: float
+) -> list[tuple[str, float, float]]:
+    """Read speech-to-text SRT entries without changing their measured boundaries."""
+    transcript = transcript_path.read_text(encoding="utf-8-sig")
+    matches = re.findall(
+        r"(?m)^\d+\s*\n"
+        r"(\d{2}):(\d{2}):(\d{2})[,.](\d{3})\s*-->\s*"
+        r"(\d{2}):(\d{2}):(\d{2})[,.](\d{3})\s*\n"
+        r"(.+?)(?=\n\s*\n|\Z)",
+        transcript,
+        flags=re.DOTALL,
+    )
+    segments = []
+    for match in matches:
+        values = [int(value) for value in match[:8]]
+        start = values[0] * 3600 + values[1] * 60 + values[2] + values[3] / 1000
+        end = values[4] * 3600 + values[5] * 60 + values[6] + values[7] / 1000
+        spoken_text = " ".join(match[8].replace("\n", " ").split())
+        if spoken_text and end > start and start < duration:
+            segments.append((spoken_text, start, min(end, duration)))
+    return segments
+
+
+def alignment_token(word: str) -> str:
+    return "".join(re.findall(r"[\w]+(?:[’'-][\w]+)*", word.lower()))
+
+
+def speech_aligned_word_times(
+    text: str, duration: float, timing_path: Path
+) -> list[tuple[float, float]] | None:
+    """Align approved script words to speech-to-text timing, tolerating small STT errors."""
+    transcript_path = transcript_path_for(timing_path)
+    if not transcript_path.is_file():
+        return None
+    try:
+        segments = parse_speech_transcript(transcript_path, duration)
+    except OSError:
+        return None
+    script_words = text.split()
+    spoken_words: list[str] = []
+    spoken_times: list[tuple[float, float]] = []
+    for segment_text, segment_start, segment_end in segments:
+        words = segment_text.split()
+        if not words:
+            continue
+        word_duration = (segment_end - segment_start) / len(words)
+        for index, word in enumerate(words):
+            spoken_words.append(word)
+            spoken_times.append(
+                (
+                    segment_start + index * word_duration,
+                    segment_start + (index + 1) * word_duration,
+                )
+            )
+    if not script_words or not spoken_words:
+        return None
+
+    matcher = SequenceMatcher(
+        None,
+        [alignment_token(word) for word in script_words],
+        [alignment_token(word) for word in spoken_words],
+        autojunk=False,
+    )
+    mapped: dict[int, tuple[float, float]] = {}
+    for block in matcher.get_matching_blocks():
+        for offset in range(block.size):
+            mapped[block.a + offset] = spoken_times[block.b + offset]
+    if len(mapped) < max(1, round(len(script_words) * 0.6)):
+        print("Warning: speech transcript differs too much from the approved script.")
+        return None
+
+    aligned: list[tuple[float, float] | None] = [None] * len(script_words)
+    for index, timing in mapped.items():
+        aligned[index] = timing
+    cursor = 0
+    while cursor < len(aligned):
+        if aligned[cursor] is not None:
+            cursor += 1
+            continue
+        run_start = cursor
+        while cursor < len(aligned) and aligned[cursor] is None:
+            cursor += 1
+        run_end = cursor
+        previous_end = aligned[run_start - 1][1] if run_start else spoken_times[0][0]
+        next_start = aligned[run_end][0] if run_end < len(aligned) else spoken_times[-1][1]
+        step = max(0.0, next_start - previous_end) / (run_end - run_start)
+        for index in range(run_start, run_end):
+            start = previous_end + (index - run_start) * step
+            aligned[index] = (start, start + step)
+    return [timing for timing in aligned if timing is not None]
+
+
 def load_caption_segments(
     text: str, duration: float, timing_path: Path
 ) -> list[tuple[str, float, float]]:
     """Load measured TTS boundaries, falling back for legacy audio files."""
-    transcript_path = timing_path.with_name(
-        timing_path.name.replace(".timings.json", ".transcript.srt")
-    )
+    transcript_path = transcript_path_for(timing_path)
     if transcript_path.is_file():
         try:
-            transcript = transcript_path.read_text(encoding="utf-8-sig")
-            matches = re.findall(
-                r"(?m)^\d+\s*\n"
-                r"(\d{2}):(\d{2}):(\d{2})[,.](\d{3})\s*-->\s*"
-                r"(\d{2}):(\d{2}):(\d{2})[,.](\d{3})\s*\n"
-                r"(.+?)(?=\n\s*\n|\Z)",
-                transcript,
-                flags=re.DOTALL,
-            )
-            segments = []
-            for match in matches:
-                values = [int(value) for value in match[:8]]
-                start = values[0] * 3600 + values[1] * 60 + values[2] + values[3] / 1000
-                end = values[4] * 3600 + values[5] * 60 + values[6] + values[7] / 1000
-                spoken_text = " ".join(match[8].replace("\n", " ").split())
-                if spoken_text and end > start:
-                    segments.append((spoken_text, start, min(end, duration)))
+            segments = parse_speech_transcript(transcript_path, duration)
             if segments and abs(segments[-1][2] - duration) <= max(2.0, duration * 0.03):
                 return segments
         except (OSError, TypeError, ValueError):
@@ -375,7 +471,8 @@ def write_caption_file(
     if not text.split():
         raise SystemExit("The selected script is empty; captions cannot be created.")
 
-    segments = load_caption_segments(text, duration, timing_path)
+    aligned_times = speech_aligned_word_times(text, duration, timing_path)
+    segments = load_caption_segments(text, duration, timing_path) if not aligned_times else []
 
     with tempfile.NamedTemporaryFile(
         mode="w",
@@ -386,6 +483,18 @@ def write_caption_file(
         delete=False,
     ) as captions:
         caption_number = 1
+        if aligned_times:
+            words = text.split()
+            for start_index in range(0, len(words), WORDS_PER_CAPTION):
+                caption_words = words[start_index:start_index + WORDS_PER_CAPTION]
+                end_index = start_index + len(caption_words) - 1
+                captions.write(f"{caption_number}\n")
+                captions.write(
+                    f"{srt_timestamp(aligned_times[start_index][0])} --> "
+                    f"{srt_timestamp(aligned_times[end_index][1])}\n"
+                )
+                captions.write(" ".join(caption_words) + "\n\n")
+                caption_number += 1
         for segment_text, segment_start, segment_end in segments:
             words = segment_text.split()
             segment_duration = segment_end - segment_start

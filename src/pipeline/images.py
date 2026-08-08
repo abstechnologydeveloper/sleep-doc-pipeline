@@ -49,7 +49,7 @@ STYLE_SUFFIX = (
 SCENE_PLAN_FILENAME = "scene_plan.json"
 IMAGE_REVIEW_FILENAME = "image_review.json"
 THUMBNAIL_STEM = "thumbnail_source"
-PLAN_VERSION = 6
+PLAN_VERSION = 7
 
 
 class ImageBudgetExceeded(RuntimeError):
@@ -133,7 +133,7 @@ def materialize_scenes(raw_scenes: object, segments: list[dict]) -> list[dict]:
                 "location": str(raw.get("location", "")).strip(),
                 "importance": str(raw.get("importance", "mandatory")).strip(),
                 "reuse_scene_id": reuse_scene_id,
-                "prompt": prompt[:900],
+                "prompt": prompt,
                 "direction": {
                     "camera": "static",
                     "transition": "fade",
@@ -204,21 +204,26 @@ def compile_scene_prompts(
         if not action:
             action = str(scene.get("narration", "")).strip()[:350]
         parts = []
+        narration = str(scene.get("narration", "")).strip()
+        if narration:
+            parts.append(f"Exact story moment: {narration[:500]}")
+        parts.append(f"Visible action: {action[:450]}")
+        if identities:
+            parts.append(f"Characters: {' | '.join(identities)}")
+        if location:
+            parts.append(f"Location: {location[:400]}")
+        if shot:
+            parts.append(f"Composition: {shot[:550]}")
+        parts.append(
+            "Story precedence: the approved narration controls the subject, action, setting, "
+            "period, characters, props, mood, and composition; generic visual defaults must "
+            "not replace or reinterpret any story detail"
+        )
         parts.append(
             "Mandatory medium: colorful animated storybook cartoon; every person, animal, "
             "building, object, and landscape must be visibly illustrated, never photographic "
             "or live action"
         )
-        if identities:
-            parts.append(f"Characters: {' | '.join(identities)}")
-        narration = str(scene.get("narration", "")).strip()
-        if narration:
-            parts.append(f"Exact story moment: {narration[:500]}")
-        parts.append(f"Visible action: {action[:450]}")
-        if location:
-            parts.append(f"Location: {location[:400]}")
-        if shot:
-            parts.append(f"Composition: {shot[:550]}")
         palette = str(project_profile.get("palette", "")).strip()
         if palette:
             parts.append(f"Color palette: {palette[:180]}")
@@ -372,6 +377,27 @@ def valid_dynamic_plan(plan: object, text: str) -> bool:
 
 def cap_distinct_scenes(scenes: list[dict], max_images: int) -> int:
     """Keep all timed beats while capping how many paid images are generated."""
+    requested_distinct = sum(
+        1 for scene in scenes if not scene.get("reuse_scene_id")
+    )
+    if requested_distinct > max_images:
+        scene_count = len(scenes)
+        if max_images <= 1:
+            anchor_indexes = {0}
+        else:
+            anchor_indexes = {
+                round(index * (scene_count - 1) / (max_images - 1))
+                for index in range(max_images)
+            }
+        last_anchor_id = None
+        for index, scene in enumerate(scenes):
+            if index in anchor_indexes:
+                scene["reuse_scene_id"] = None
+                last_anchor_id = scene["id"]
+            else:
+                scene["reuse_scene_id"] = last_anchor_id
+        return len(anchor_indexes)
+
     distinct_count = 0
     last_distinct_id = None
     root_by_id: dict[str, str] = {}
@@ -428,6 +454,13 @@ def create_dynamic_visual_plan(
         f"{item['id']}. {item['text']}" for item in segments
     )
     prompt = f"""Act as the storyboard director for an original narrated YouTube story.
+The creator's approved narration has precedence over every generic visual convention or
+default. It alone determines who and what appears, the exact action, species, objects,
+location, geography, culture, period, weather, mood, and story progression. Use generic
+defaults only when the narration genuinely leaves a visual detail open. Never change a story
+fact to make a more familiar, dramatic, cinematic, cozy, or attractive image. Safety, native
+16:9 output, and the required illustrated medium remain fixed.
+
 First classify the narration as factual or fictional. For factual history, invention, origin,
 science, archaeology, biography, or documentary narration, use only people, objects, places,
 actions, dates, and uncertainty stated in the narration. Never invent a protagonist, inventor,
@@ -442,6 +475,9 @@ overlaps. Never split a numbered segment.
 Give each important setup, clue, reveal, relationship turn, character decision, climax action,
 payoff, and final emotional resolution an honest matching visual beat. Do not use a generic
 atmosphere image when the narration describes a specific meaningful action.
+The image appears when the first segment in its scene begins. Its main subject and visible
+action must therefore match that first segment, not a more dramatic sentence heard later.
+Never combine different sites, time periods, artifacts, people, or actions into one image.
 
 Art-direct the opening for viewer attention without changing the narration. The first image
 must show the exact person, animal, object, place, choice, or contradiction that creates the
@@ -454,9 +490,14 @@ scene. After the hook is clear, let the visual pace settle naturally.
 
 The hard paid-image limit is {max_images}. You must stay within it. Preserve every narrative
 beat as a timed scene, but consolidate nearby events into stronger compositions and reuse the
-closest suitable earlier visual with a different camera movement when a new paid image would
-exceed the limit. Never report the budget as insufficient. A scene may reuse an earlier image
-by setting reuse_scene_id to that earlier ID.
+closest suitable earlier visual when a new paid image would exceed the limit. Never report the
+budget as insufficient. A scene may reuse an earlier image by setting reuse_scene_id to that
+earlier ID.
+
+Spread distinct paid images across the entire narration, including the ending. Never spend
+the full image budget near the beginning and reuse one unrelated image for the rest. Reuse is
+allowed only for the immediately following passage when the subject, location, period, and
+central visible action still match what the listener hears.
 
 The visual medium is mandatory for this product: high-quality colorful animated storybook
 cartoon artwork for every story, audience, and genre. Humans must look like clearly stylized
@@ -998,8 +1039,10 @@ def review_image_batch(
         "human, wrong story action or location, accidental text or logo, badly broken "
         "anatomy, missing main subject, framing that hides the important action, or any "
         "photographic, photorealistic, or live-action appearance instead of the mandatory "
-        "colorful animated storybook cartoon medium. Minor differences within cartoon styles "
-        "are acceptable. "
+        "colorful animated storybook cartoon medium. The expected story moment and visible "
+        "action are binding: fail an image that merely fits the general topic but depicts a "
+        "different nearby scene, artifact, place, period, person, animal, or action. Minor "
+        "differences within cartoon styles are acceptable. "
         "Return JSON only with a reviews array. Each review needs id, passed, confidence "
         "from 0 to 1, and one short correction."
     ))]

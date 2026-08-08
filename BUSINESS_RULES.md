@@ -53,6 +53,9 @@
 41k. Factual research may use primary documents, archaeological publications, museums, governments, universities, peer-reviewed work, and established reference institutions; crowd-written sites, forums, videos, blogs, tourism, retail, and unsourced search summaries cannot establish a factual claim.
 41l. When factual correction makes narration shorter than its approved duration, one length-repair pass may add only context already supported by the same research; the repaired narration must pass the factual audit again before approval.
 41m. A factual audit passes only when every material narration claim is individually marked as supported and mapped to reliable evidence; a general bibliography or bare verdict is insufficient.
+41n. When a speech transcript is available, image boundaries and captions share one transcript-aligned timeline; captions retain the approved script wording, and estimated chunk timing is used only as a fallback.
+41o. Paid story images are distributed across the full narration; each image must match the first spoken moment of its scene, and reuse is allowed only for an adjacent passage with the same subject, place, period, and visible action.
+41p. Approved narration outranks generic visual defaults for image content, while safety, native 16:9 output, and the selected illustrated medium remain fixed.
 41a. Every generated scene image and thumbnail uses a coherent animated storybook/cartoon medium; human characters must remain visibly illustrated and must never become photographs or live-action people.
 42. Paystack Checkout is the only browser-accessible path for purchasing paid access, and plan entitlements are never accepted from browser form or callback values.
 43. A paid plan becomes effective only after My Automation Studio verifies a successful Paystack transaction or accepts a correctly signed `charge.success` webhook.
