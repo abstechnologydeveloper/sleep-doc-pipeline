@@ -18,7 +18,7 @@ from project_paths import PROJECT_ROOT, SCRIPTS_DIR
 
 MODEL = "gemini-2.5-flash"
 MAX_PARTS = 20
-MAX_FACT_REVISIONS = 1
+MAX_FACT_REVISIONS = 2
 WORDS_PER_CHUNK = 2_200
 WORDS_PER_MINUTE = 150
 MINIMUM_WORD_RATIO = 0.9
@@ -28,7 +28,17 @@ HEADING_PATTERN = re.compile(
     flags=re.IGNORECASE,
 )
 FACTUAL_NICHE_PATTERN = re.compile(
-    r"\b(?:history|historical|documentary|war|military|science|scientific|biography|true story)\b",
+    r"\b(?:history|historical|documentary|war|military|science|scientific|biography|"
+    r"true story|invent|invented|invention|origin|origins|archaeology|archaeological|"
+    r"ancient|discovery|discovered|who created|how did humans|how was .+ (?:made|created)|"
+    r"how .{1,80} changed .{1,80} forever)\b",
+    flags=re.IGNORECASE,
+)
+UNSUPPORTED_ORIGIN_PATTERN = re.compile(
+    r"\b(?:someone|a hunter|one hunter|an ancient hunter)\s+(?:had|got|found|tried|"
+    r"decided|realized|noticed|invented|created)\b|"
+    r"\b(?:this|that)\s+was\s+the\s+first\s+(?:version|prototype|example|form|design|"
+    r"tool|weapon|invention|use)\b",
     flags=re.IGNORECASE,
 )
 NON_NAME_WORDS = {
@@ -166,6 +176,33 @@ def needs_grounded_research(niche: str, topic: str) -> bool:
     return bool(FACTUAL_NICHE_PATTERN.search(f"{niche} {topic}"))
 
 
+def classify_factual_topic(
+    client: genai.Client, niche: str, topic: str, title: str = ""
+) -> bool:
+    """Choose factual or fictional treatment from the creator's complete request."""
+    context = f"{niche} {topic} {title}".strip()
+    if needs_grounded_research(niche, f"{topic} {title}"):
+        return True
+    response = client.models.generate_content(
+        model=MODEL,
+        contents=f"""Classify this planned video as FACTUAL or FICTIONAL.
+FACTUAL means it explains real history, people, cultures, science, objects, inventions,
+events, or any real-world claims that require research. This includes documentary stories,
+folklore explained as history, and mixed prompts whose factual claims must remain accurate.
+FICTIONAL means the creator clearly asks for an invented narrative, even if its setting
+resembles a real period. Judge the creator's intended promise from the complete request, not
+one keyword or the proposed visual style. Return exactly one word: FACTUAL or FICTIONAL.
+
+REQUEST
+{context}""",
+        config=types.GenerateContentConfig(
+            max_output_tokens=10,
+            temperature=0,
+        ),
+    )
+    return str(response.text or "").strip().upper().startswith("FACTUAL")
+
+
 def grounding_sources(response) -> list[str]:
     """Extract unique Google Search grounding links without relying on one SDK shape."""
     sources: list[str] = []
@@ -207,17 +244,24 @@ def research_factual_topic(client: genai.Client, topic: str, niche: str) -> str:
     """Create a source-backed fact brief before drafting a factual video."""
     return grounded_text(
         client,
-        f"""Research this planned factual YouTube video using reliable primary, museum,
-government, university, or established historical sources wherever possible.
+        f"""Research this planned factual YouTube video using only primary documents,
+archaeological publications, museums, government agencies, universities, peer-reviewed work,
+or established reference institutions. Do not use Wikipedia, Fandom, forums, social media,
+YouTube, blogs, tourism pages, retailers, commercial product pages, crowd-written children's
+sites, or unsourced search summaries as evidence. If an important claim cannot be confirmed
+by an allowed source, place it under CLAIMS TO AVOID instead of VERIFIED FACTS.
 
 Topic: {topic}
 Channel niche: {niche or 'factual documentary'}
 
 Return a concise production brief with these headings:
 VERIFIED FACTS, CHRONOLOGY, DISPUTED OR UNCERTAIN CLAIMS, CLAIMS TO AVOID, PRONUNCIATIONS,
-and SOURCE NOTES. Include exact names, dates, places, context, and uncertainty needed to write
-the video accurately. Do not invent dialogue, private thoughts, numbers, motives, or events.
-Clearly label legends and disputed claims. This is research, not the narration script.""",
+and SOURCE NOTES. Put the supporting institution and source title beside every verified fact.
+Include exact names, dates, places, context, and uncertainty needed to write the video
+accurately. Distinguish what an artifact is from how scholars interpret it. Do not invent
+dialogue, private thoughts, numbers, motives, events, intended purposes, or cultural meaning.
+Clearly label estimates, legends, disputed claims, and gaps in evidence. This is research, not
+the narration script.""",
     )
 
 
@@ -227,13 +271,35 @@ def review_factual_script(
     """Ground-check every material factual claim before downstream paid work starts."""
     return grounded_text(
         client,
-        f"""Fact-check the narration below using Google Search and the supplied research brief.
+        f"""Independently fact-check the narration below using Google Search. Treat the supplied
+research brief as leads, not proof. Confirm claims only with primary documents, archaeological
+publications, museums, government agencies, universities, peer-reviewed work, or established
+reference institutions. Ignore claims supported only by Wikipedia, Fandom, forums, social
+media, YouTube, blogs, tourism pages, retailers, commercial pages, crowd-written children's
+sites, or search summaries.
+
 Check names, dates, places, sequence, quantities, quotations, causation, disputed claims, and
-whether legend is presented as fact. Also flag invented dialogue or private thoughts.
+whether legend is presented as fact. Also flag invented dialogue, private thoughts, named or
+unnamed illustrative participants, and fictional family scenes. For an invention or origin
+topic, return FAIL if the script invents even an unnamed person, a clever
+idea moment, a first prototype, a first use, or a neat step-by-step origin unsupported by
+evidence. For every factual topic, verify precise ages, dates, dimensions, materials, group or
+cultural attribution, intended purpose, military use, adoption order, and claims about modern
+use. Distinguish an excavated object from an interpretation of how it was used. Fail absolute
+safety, injury, killing, universality, effectiveness, or intended-purpose claims unless the
+evidence supports that exact wording. Separate earlier practices from later technologies or
+animals that changed their use. Reject broad claims about feeding communities, helping people
+thrive, harmony, symbolism, or historical importance when the sources do not establish them.
 
 The first line must be exactly VERDICT: PASS when no material correction is needed, or
-VERDICT: FAIL when any material claim needs correction. After that, list each issue with a
-specific correction. Do not fail only for writing style.
+VERDICT: FAIL when any material claim needs correction. Then include a CLAIM AUDIT section.
+Quote each sentence or short claim that contains a date, number, place, artifact, material,
+method, group attribution, chronology, purpose, effect, comparison, or conclusion. Mark each
+SUPPORTED, QUALIFY, or REMOVE and place its reliable source directly beside it. PASS is allowed
+only when every material claim is SUPPORTED. Then include a SOURCES CHECKED section naming the
+reliable institutions used. A bibliography without claim-level support is not verification.
+Do not pass merely because the research brief repeats the narration. Do not fail only for
+writing style.
 
 TOPIC
 {topic}
@@ -244,6 +310,47 @@ RESEARCH BRIEF
 NARRATION
 {script}""",
     )
+
+
+def sourced_factual_review(
+    client: genai.Client, topic: str, script: str, research_brief: str
+) -> str:
+    """Require a factual PASS to identify the reliable sources that support it."""
+    review = review_factual_script(client, topic, script, research_brief)
+    upper_review = review.upper()
+    required_audit = (
+        "CLAIM AUDIT" in upper_review
+        and "SUPPORTED" in upper_review
+        and not re.search(
+            r"(?mi)^\s*(?:[-*]\s*)?(?:status:\s*)?(?:QUALIFY|REMOVE)\b",
+            review,
+        )
+        and (
+            "SOURCES CHECKED" in upper_review
+            or "GROUNDING SOURCES" in upper_review
+        )
+    )
+    if review.lstrip().upper().startswith("VERDICT: PASS") and not required_audit:
+        review = review_factual_script(client, topic, script, research_brief)
+        upper_review = review.upper()
+        required_audit = (
+            "CLAIM AUDIT" in upper_review
+            and "SUPPORTED" in upper_review
+            and not re.search(
+                r"(?mi)^\s*(?:[-*]\s*)?(?:status:\s*)?(?:QUALIFY|REMOVE)\b",
+                review,
+            )
+            and (
+                "SOURCES CHECKED" in upper_review
+                or "GROUNDING SOURCES" in upper_review
+            )
+        )
+    if review.lstrip().upper().startswith("VERDICT: PASS") and not required_audit:
+        return (
+            "VERDICT: FAIL\nThe factual audit did not map every material claim to reliable "
+            "evidence. Verify each claim before approving the narration."
+        )
+    return review
 
 
 def revise_factual_script(
@@ -261,11 +368,23 @@ def revise_factual_script(
     avoid_character_names: list[str] | None = None,
 ) -> str:
     """Correct a failed factual draft once while preserving the requested duration."""
-    response = client.models.generate_content(
-        model=MODEL,
-        contents=f"""Correct the narration using the fact-check report and research brief.
-Remove any claim that cannot be supported. Label legends and uncertainty clearly. Do not add
-new facts, quotations, dialogue, or private thoughts. Keep one continuous narration between
+    config = types.GenerateContentConfig(
+        system_instruction=build_system_prompt(
+            min_words, max_words, niche, audience, creator_goal,
+            content_style, title, avoid_character_names, True,
+        ),
+        max_output_tokens=8_000,
+        temperature=0.25,
+    )
+    correction_prompt = f"""Correct the narration using the fact-check report and research brief.
+Remove or qualify every claim that cannot be supported. Label legends, estimates, scholarly
+interpretation, and uncertainty clearly. Do not add
+new facts, quotations, dialogue, private thoughts, illustrative participants, or fictional
+family scenes. For invention and origin topics, remove all imagined inventors, clever-idea
+moments, first prototypes, first uses, and neat origin sequences. Begin with what is unknown,
+then explain evidence, operation, variation, chronology, and later influence. Replace absolute
+claims about purpose, safety, effectiveness, cultural importance, or current use with the
+precise supported meaning. Keep one continuous narration between
 {min_words:,} and {max_words:,} words and return narration prose only.
 
 RESEARCH BRIEF
@@ -275,25 +394,43 @@ FACT-CHECK REPORT
 {review}
 
 CURRENT NARRATION
-{script}""",
-        config=types.GenerateContentConfig(
-            system_instruction=build_system_prompt(
-                min_words, max_words, niche, audience, creator_goal,
-                content_style, title, avoid_character_names,
-            ),
-            max_output_tokens=8_000,
-            temperature=0.25,
-        ),
+{script}"""
+    response = client.models.generate_content(
+        model=MODEL,
+        contents=correction_prompt,
+        config=config,
     )
     if not response.text:
         raise RuntimeError("The factual correction pass returned no narration.")
-    return apply_quality_gate(response.text, min_words, max_words)
+    corrected = response.text.strip()
+    if word_count(corrected) < min_words:
+        missing_words = min_words - word_count(corrected)
+        repair_response = client.models.generate_content(
+            model=MODEL,
+            contents=f"""The corrected factual narration below is {missing_words} words short.
+Rewrite and return the complete narration between {min_words} and {max_words} words. Preserve
+all corrections. Add only useful context already supported by the research brief. Do not add
+new claims, invented people, scenes, dialogue, repetition, decorative filler, or a second
+ending. Return the full narration only.
+
+RESEARCH BRIEF
+{research_brief}
+
+CORRECTED NARRATION
+{corrected}""",
+            config=config,
+        )
+        if not repair_response.text:
+            raise RuntimeError("The factual length repair returned no narration.")
+        corrected = repair_response.text.strip()
+    return apply_quality_gate(corrected, min_words, max_words)
 
 
 def build_system_prompt(
     min_words: int, max_words: int, niche: str = "", audience: str = "",
     creator_goal: str = "", content_style: str = "", title: str = "",
     avoid_character_names: list[str] | None = None,
+    factual_mode: bool = False,
 ) -> str:
     creator_context = ""
     if niche or audience or creator_goal or content_style:
@@ -312,10 +449,10 @@ def build_system_prompt(
             "character, culture, species, place, and time. A required real historical name is allowed.\n"
         )
     profile_text = f"{niche} {audience} {creator_goal}".lower()
-    if FACTUAL_NICHE_PATTERN.search(profile_text):
-        opening_rule = """- Open inside the most important real moment, choice, discovery, or conflict. Within
-  the first 80 spoken words, establish the relevant place and time in simple language, show
-  what is at stake, and give the viewer the main historical question or promise. Do not begin
+    if factual_mode or FACTUAL_NICHE_PATTERN.search(profile_text):
+        opening_rule = """- Open with the main factual question, the strongest supported evidence, or the most
+  important documented moment. Within the first 80 spoken words, establish the relevant place
+  and time when known and state what the evidence can help answer. Do not begin
   with a greeting, channel introduction, broad textbook summary, or unsupported dramatic claim."""
     elif any(
         word in profile_text
@@ -329,8 +466,8 @@ def build_system_prompt(
         opening_rule = """- Open with a visible action, difficult choice, surprising fact, or clear mystery.
   Within the first 80 spoken words, establish the focal subject, what they want, and the main
   question that gives the viewer a reason to continue."""
-    if FACTUAL_NICHE_PATTERN.search(profile_text):
-        closing_rule = """- End by answering the opening historical question with supported facts, then explain
+    if factual_mode or FACTUAL_NICHE_PATTERN.search(profile_text):
+        closing_rule = """- End by answering the opening factual question with supported evidence, then explain
   in two or three plain sentences what changed and why it still matters. Do not end with a
   generic lesson, channel promotion, invented quotation, or request to like and subscribe."""
     elif any(
@@ -343,12 +480,72 @@ def build_system_prompt(
     else:
         closing_rule = """- End by resolving the opening question through the lead's choices. Show the result
   in one memorable final action or image instead of explaining the whole story again."""
-    title_rule = (
-        f'- The working video title is "{title}". The opening question, central conflict, climax, '
-        "and ending must honestly deliver its promise without repeating the title as narration."
-        if title else
-        "- Keep the opening question, central conflict, climax, and ending focused on one honest promise."
+    if factual_mode:
+        title_rule = (
+            f'- The working video title is "{title}". The evidence, explanation, uncertainty, '
+            "and conclusion must honestly answer that exact factual promise."
+            if title else
+            "- Keep the evidence, explanation, uncertainty, and conclusion focused on one factual question."
+        )
+    else:
+        title_rule = (
+            f'- The working video title is "{title}". The opening question, central conflict, climax, '
+            "and ending must honestly deliver its promise without repeating the title as narration."
+            if title else
+            "- Keep the opening question, central conflict, climax, and ending focused on one honest promise."
+        )
+    factual_rule = ""
+    character_name_rule = (
+        "- When the topic does not provide a character name, choose a fresh name that fits "
+        "the setting, culture, species, time period, and audience.\n"
     )
+    if factual_mode:
+        factual_rule = """- This is a factual video. Never invent a named protagonist, inventor, witness,
+  quotation, private thought, experiment, event, date, or step-by-step origin story. Never
+  assign an invention to one person unless reliable evidence identifies that person. When the
+  inventor or exact origin is unknown, say so near the opening, explain what evidence does
+  exist, distinguish evidence from reasonable possibility, and describe gradual development
+  without turning it into fiction.
+"""
+        character_name_rule = ""
+        avoided_name_rule = ""
+        narrative_character_rules = """- Organize the video around verified evidence, how the tool or event worked, how it
+  changed over time, and what remains unknown. Use real named people only when the evidence
+  requires them. Animated pictures may illustrate documented people and actions, but they
+  must never turn the factual account into a fictional character adventure.
+"""
+        progression_rule = """- Build interest from a clear question, surprising supported evidence, useful context, how
+  the subject worked, how it changed or spread, and the honest answer. Each new beat must add
+  a verified fact, artifact, comparison, consequence, or clearly labelled uncertainty. Follow
+  the chronology when known; otherwise use the clearest evidence-led order. Do not manufacture
+  obstacles, personal motives, emotional turns, or a dramatic climax.
+"""
+    else:
+        narrative_character_rules = """- When the topic or picture direction calls for animation, freely use animals, birds, fish,
+  weather, objects, or imaginary beings as main characters. They may live, work, travel, and
+  solve problems like people while keeping traits and abilities that fit what they are.
+- Make the character's occupation, age, personality, goal, flaw, relationships, and choices
+  specific to this premise. Do not recycle the same lonely traveler, child, librarian, baker,
+  lighthouse keeper, or mysterious stranger structure when the topic does not require it.
+- Give this video a distinct story shape. Vary the opening event, main problem, setting,
+  character age, occupation, relationship, key object, turning point, and ending. Never reuse
+  the same sequence of arrival, mysterious guide, glowing clue, hidden room, and peaceful rest.
+- Pay off important clues, promises, objects, rules, and relationships. The climax should
+  result from the central character's accumulated choices, learning, kindness, or courage.
+- Resolve the central story question and show the emotional change before a gentle ending.
+  Do not rush, preach a moral, recap the whole plot, or introduce a new major conflict.
+"""
+        progression_rule = """- Open with a simple curiosity hook, then introduce a small discovery, choice, surprise,
+  funny detail, or emotional change regularly so the journey stays interesting.
+- Establish one clear central character or focal subject, what they want or need, and the
+  main story question early. Do not spend a long opening only describing atmosphere.
+- Build a cause-and-effect chain: each important action, discovery, decision, and consequence
+  must grow naturally from what happened before. Avoid coincidences that solve the problem.
+- Give the middle real progress and change. Add a complication, useful discovery, reversal,
+  relationship shift, or difficult choice instead of repeating similar scenes.
+- Add a meaningful progress beat roughly every 45 to 90 seconds. Each beat must change what
+  the viewer understands. Do not use fake cliffhangers or repeat the same question.
+"""
     return f"""You write narration scripts for a storytelling video channel.
 Create one continuous narrative arc with no chapters, chapter headings, numbered sections,
 repeated templates, or other structural labels. Match the energy to the creator's niche,
@@ -369,41 +566,19 @@ Use original language and follow these writing rules:
   tapestry, symphony, profound, enigmatic, testament, and emanating unless truly necessary.
 - Use only a few useful sensory details. Do not describe the same light, weather, silence,
   feeling, room, or landscape again in different words.
-- Open with a simple curiosity hook, then introduce a small discovery, choice, surprise,
-  funny detail, or emotional change regularly so the journey stays interesting.
 {opening_rule}
 {title_rule}
-- Establish one clear central character or focal subject, what they want or need, and the
-  main story question early. Do not spend a long opening only describing atmosphere.
+{factual_rule}
+{progression_rule}
 - Treat every character species, age, role, relationship, location, period, and important
   object explicitly supplied by the creator as binding. Never turn an animal, bird, fish,
   object, cloud, or imaginary being into a human merely because it speaks, works, or dresses.
-- Build a cause-and-effect chain: each important action, discovery, decision, and consequence
-  must grow naturally from what happened before. Avoid coincidences that solve the problem.
-- Give the middle real progress and change. Add a complication, useful discovery, reversal,
-  relationship shift, or difficult choice instead of repeating similar scenes.
-- Add a meaningful progress beat roughly every 45 to 90 seconds of expected narration: a new
-  clue, attempt, obstacle, answer, choice, visual location, relationship change, or consequence.
-  Each beat must change what the viewer understands. Do not use fake cliffhangers or repeat the
-  same question in different words.
 - Keep names, relationships, knowledge, motivations, locations, props, time, weather, travel,
   and physical details consistent unless the story clearly changes them.
-- When the topic does not provide a character name, choose a fresh name that fits the setting,
-  culture, species, time period, and audience. Avoid stock AI motifs such as glowing forests,
+- Avoid stock AI motifs such as glowing forests,
   whispering lights, fallen stars, magical clocks, and forgotten towns unless asked.
-{avoided_name_rule}- When the topic or picture direction calls for animation, freely use animals, birds, fish,
-  weather, objects, or imaginary beings as main characters. They may live, work, travel, and
-  solve problems like people while keeping traits and abilities that fit what they are.
-- Make the character's occupation, age, personality, goal, flaw, relationships, and choices
-  specific to this premise. Do not recycle the same lonely traveler, child, librarian, baker,
-  lighthouse keeper, or mysterious stranger structure when the topic does not require it.
-- Give this video a distinct story shape. Vary the opening event, main problem, setting,
-  character age, occupation, relationship, key object, turning point, and ending. Never reuse
-  the same sequence of arrival, mysterious guide, glowing clue, hidden room, and peaceful rest.
-- Pay off important clues, promises, objects, rules, and relationships. The climax should
-  result from the central character's accumulated choices, learning, kindness, or courage.
-- Resolve the central story question and show the emotional change before a gentle ending.
-  Do not rush, preach a moral, recap the whole plot, or introduce a new major conflict.
+{character_name_rule}
+{avoided_name_rule}{narrative_character_rules}
 {closing_rule}
 - Use natural dialogue and gentle humor when they fit. Never force jokes into sad, tense,
   historical, or reflective moments.
@@ -538,7 +713,7 @@ def generate_script(
     config = types.GenerateContentConfig(
         system_instruction=build_system_prompt(
             min_words, max_words, niche, audience, creator_goal, content_style, title,
-            avoid_character_names
+            avoid_character_names, bool(research_brief)
         ),
         max_output_tokens=8_000,
         temperature=0.8,
@@ -702,7 +877,7 @@ def main() -> None:
     avoided_names = recent_character_names(recent_scripts)
 
     research_brief = ""
-    factual_mode = needs_grounded_research(args.niche, topic)
+    factual_mode = classify_factual_topic(client, args.niche, topic, args.title)
     if factual_mode:
         print("Researching factual claims with Google Search grounding...")
         research_brief = research_factual_topic(client, topic, args.niche)
@@ -753,7 +928,12 @@ def main() -> None:
     fact_check = ""
     if factual_mode:
         print("Fact-checking the completed narration...")
-        fact_check = review_factual_script(client, topic, script, research_brief)
+        fact_check = sourced_factual_review(client, topic, script, research_brief)
+        if UNSUPPORTED_ORIGIN_PATTERN.search(script):
+            fact_check = (
+                "VERDICT: FAIL\nThe narration invents an unsupported person, first version, "
+                "or step-by-step origin. Remove that scene and begin with what is unknown."
+            )
         for revision_number in range(MAX_FACT_REVISIONS):
             if fact_check.lstrip().upper().startswith("VERDICT: PASS"):
                 break
@@ -775,7 +955,16 @@ def main() -> None:
                 args.title,
                 avoided_names,
             )
-            fact_check = review_factual_script(client, topic, script, research_brief)
+            fact_check = sourced_factual_review(client, topic, script, research_brief)
+            if UNSUPPORTED_ORIGIN_PATTERN.search(script):
+                fact_check = (
+                    "VERDICT: FAIL\nThe corrected narration still invents an unsupported "
+                    "person, first version, or step-by-step origin."
+                )
+        if not fact_check.lstrip().upper().startswith("VERDICT: PASS"):
+            raise RuntimeError(
+                "The factual script could not be verified after automatic correction."
+            )
 
     output_dir = SCRIPTS_DIR
     output_dir.mkdir(parents=True, exist_ok=True)

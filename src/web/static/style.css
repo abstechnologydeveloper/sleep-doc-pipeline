@@ -26,6 +26,8 @@
   --auth-gradient: radial-gradient(circle at top, #e9edff, #f5f7fb 55%);
 }
 
+[hidden] { display: none !important; }
+
 html[data-theme="dark"] {
   color-scheme: dark;
   color: #e8ebf2;
@@ -360,6 +362,41 @@ tr:last-child td { border-bottom: 0; }
 .advanced-options > .studio-form { padding: 4px 14px 14px; }
 .unavailable-option { opacity: .55; }
 
+.create-studio { display: grid; grid-template-columns: minmax(0, 1.75fr) minmax(300px, .75fr); gap: 18px; align-items: start; }
+.create-studio > .panel { margin-bottom: 18px; }
+.story-composer { padding: 26px; }
+.composer-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; margin-bottom: 22px; }
+.composer-heading h2, .creation-controls h2 { margin: 0 0 7px; font-size: 22px; }
+.composer-heading p:last-child, .creation-controls > div:first-child p:last-child { margin: 0; font-size: 13px; }
+.cartoon-badge { flex: 0 0 auto; padding: 7px 10px; border: 1px solid #a46ef0; border-radius: 999px; background: #7c3aed1a; color: #a78bfa; font-size: 11px; font-weight: 800; }
+.mode-field { display: grid; grid-template-columns: 130px minmax(0, 330px); align-items: center; gap: 12px; margin-bottom: 14px; }
+.story-writing-field { display: grid; gap: 8px; }
+.story-writing-field > span { font-size: 14px; font-weight: 750; }
+.story-writing-field textarea { min-height: 330px; padding: 18px; border-radius: 11px; font-size: 15px; line-height: 1.65; }
+.story-writing-field small { font-size: 11px; }
+.idea-helper { margin-top: 14px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 9px; background: var(--panel-soft); }
+.idea-helper summary { cursor: pointer; font-size: 12px; font-weight: 750; }
+.idea-helper .prompt-chips { margin-top: 12px; }
+.story-composer > .advanced-options { margin-top: 14px; }
+.advanced-options summary span { float: right; color: var(--muted); font-size: 10px; font-weight: 500; }
+.creation-controls { position: sticky; top: 24px; display: grid; gap: 16px; padding: 22px; }
+.creation-controls > label { display: grid; gap: 7px; font-size: 13px; font-weight: 700; }
+.creation-controls > label > span { color: var(--muted); font-size: 11px; font-weight: 400; }
+.control-card { display: grid; grid-template-columns: 32px minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 13px; border: 1px solid var(--border); border-radius: 9px; background: var(--panel-soft); }
+.control-card.visual-choice { border-color: #8b5cf655; background: linear-gradient(135deg, #7c3aed12, var(--panel-soft)); }
+.control-card strong, .control-card small { display: block; }
+.control-card strong { margin-bottom: 3px; font-size: 12px; }
+.control-card small { color: var(--muted); font-size: 10px; line-height: 1.4; }
+.control-card a, .control-card b { color: var(--blue); font-size: 10px; }
+.control-icon { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 8px; background: var(--blue-soft); color: var(--blue); font-weight: 900; }
+.approval-path { padding-top: 15px; border-top: 1px solid var(--border-soft); }
+.approval-path > strong { font-size: 12px; }
+.approval-path ol { display: grid; gap: 9px; margin: 12px 0 0; padding: 0; list-style: none; }
+.approval-path li { display: flex; align-items: center; gap: 9px; color: var(--muted); font-size: 11px; }
+.approval-path li span { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--blue-soft); color: var(--blue); font-size: 9px; font-weight: 800; }
+.creation-controls .create-video-button { width: 100%; min-height: 48px; }
+.cost-note { text-align: center; font-size: 10px; }
+
 .marketing-body { color: var(--text); background: #ffffff; }
 html[data-theme="dark"] .marketing-body { background: var(--marketing-bg); }
 .marketing-nav { position: sticky; top: 0; z-index: 50; display: flex; align-items: center; justify-content: space-between; width: 100%; margin: auto; padding: 15px max(20px, calc((100% - 1180px) / 2)); border-bottom: 1px solid var(--border-soft); background: var(--panel); background: color-mix(in srgb, var(--panel) 94%, transparent); backdrop-filter: blur(14px); }
@@ -516,13 +553,15 @@ html[data-theme="dark"] .plan-badge { color: #b9c5ff; }
 .rough-thumbnail { max-width: 520px; margin: 18px 0; }
 .rough-thumbnail strong { display: block; margin-bottom: 8px; }
 .review-reject { margin-top: 14px; }
+.review-choice-row { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
 .cta-panel { width: min(1050px, calc(100% - 40px)); margin: 50px auto 110px; padding: 65px 30px; border: 1px solid #ccd6ff; border-radius: 24px; background: radial-gradient(circle at top, #f4f6ff, #eef2ff 62%); text-align: center; }
 html[data-theme="dark"] .cta-panel { border-color: #3c4770; background: radial-gradient(circle at top, #26336b, #151928 62%); }
 .cta-panel p { max-width: 580px; margin: 0 auto 23px; }
 .marketing-footer { display: flex; flex-wrap: wrap; justify-content: center; gap: 18px; width: min(1180px, calc(100% - 40px)); margin: auto; padding: 25px 0; border-top: 1px solid var(--border); color: var(--muted); font-size: 11px; }
 
 @media (max-width: 1050px) {
-  .overview-grid, .form-layout, .social-layout, .job-layout { grid-template-columns: 1fr; }
+  .overview-grid, .form-layout, .social-layout, .job-layout, .create-studio { grid-template-columns: 1fr; }
+  .creation-controls { position: static; }
   .span-two { grid-column: auto; }
   .metric-grid { grid-template-columns: 1fr 1fr; }
   .pricing-grid { grid-template-columns: 1fr 1fr; }
@@ -573,6 +612,10 @@ html[data-theme="dark"] .cta-panel { border-color: #3c4770; background: radial-g
   .metric-grid article { padding: 13px; }
   .page-heading { display: grid; }
   .panel { padding: 16px; }
+  .composer-heading { display: grid; }
+  .cartoon-badge { width: max-content; }
+  .mode-field { grid-template-columns: 1fr; }
+  .story-writing-field textarea { min-height: 250px; padding: 13px; }
   .form-submit-bar { align-items: stretch; flex-direction: column; }
   .media-grid { grid-template-columns: 1fr 1fr; }
   .job-heading .status { margin-top: 2px; }

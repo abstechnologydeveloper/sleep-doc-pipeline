@@ -62,7 +62,10 @@ def parse_args() -> argparse.Namespace:
         default="",
         help="Optional post title used to create the video thumbnail",
     )
-    parser.add_argument("--voice", default="Kore", help="Gemini narration voice")
+    parser.add_argument(
+        "--voice", default="edge_en-US-AvaNeural",
+        help="AI33.Pro narration voice ID",
+    )
     parser.add_argument(
         "--voice-direction", default="neutral",
         help="Requested narration sound, such as masculine, feminine, warm, or deep",
@@ -299,7 +302,13 @@ def main() -> None:
     )
     run_optional_step(
         "4/5 Generating optional story sound effects",
-        [python, str(BASE_DIR / "generate_sounds.py"), str(script_path)],
+        [
+            python,
+            str(BASE_DIR / "generate_sounds.py"),
+            str(script_path),
+            "--title",
+            args.title,
+        ],
     )
     run_step(
         "5/5 Assembling captioned video",
