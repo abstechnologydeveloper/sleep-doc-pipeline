@@ -19,6 +19,7 @@ from project_paths import (
     AUDIO_DIR, DATA_DIR, IMAGES_DIR, SCRIPTS_DIR, SOUNDS_DIR, THUMBNAILS_DIR,
     VIDEOS_DIR,
 )
+from production_limits import MAX_VIDEO_MINUTES
 
 from . import database
 from . import storage
@@ -1008,7 +1009,9 @@ def update_settings(
         return HTMLResponse("Choose a supported narration voice", status_code=400)
     if voice_direction not in VOICE_DIRECTIONS:
         return HTMLResponse("Choose a supported voice direction", status_code=400)
-    if not 0.5 <= default_story_minutes <= float(user["max_minutes_per_job"]):
+    if not 0.5 <= default_story_minutes <= min(
+        float(user["max_minutes_per_job"]), MAX_VIDEO_MINUTES
+    ):
         return HTMLResponse("Default duration exceeds your plan limit", status_code=400)
     database.update_creator_settings(
         int(user["id"]),
@@ -1401,11 +1404,14 @@ async def automatic_job(request: Request):
             validate_creator_content(provided_script[start:start + 10_000])
     except ValueError:
         return HTMLResponse("Invalid story request", status_code=400)
-    if minutes < 0.5 or (
-        not is_admin(user) and minutes > float(user["max_minutes_per_job"])
-    ):
+    effective_max_minutes = (
+        MAX_VIDEO_MINUTES
+        if is_admin(user)
+        else min(float(user["max_minutes_per_job"]), MAX_VIDEO_MINUTES)
+    )
+    if minutes < 0.5 or minutes > effective_max_minutes:
         return HTMLResponse(
-            f"Duration must be between 0.5 and {user['max_minutes_per_job']:g} minutes.",
+            f"Duration must be between 0.5 and {effective_max_minutes:g} minutes.",
             status_code=409,
         )
     storage_usage = creator_storage(user)
@@ -2396,8 +2402,11 @@ def admin_update_customer(
         return HTMLResponse("Invalid form token", status_code=400)
     if not 0 <= monthly_job_limit <= 10_000:
         return HTMLResponse("Monthly limit must be between 0 and 10,000", status_code=400)
-    if not 0.5 <= max_minutes_per_job <= 600:
-        return HTMLResponse("Duration limit must be between 0.5 and 600 minutes", status_code=400)
+    if not 0.5 <= max_minutes_per_job <= MAX_VIDEO_MINUTES:
+        return HTMLResponse(
+            f"Duration limit must be between 0.5 and {MAX_VIDEO_MINUTES} minutes",
+            status_code=400,
+        )
     if plan not in PLANS:
         return HTMLResponse("Invalid customer plan", status_code=400)
     if not 1 <= max_images_per_job <= 48:

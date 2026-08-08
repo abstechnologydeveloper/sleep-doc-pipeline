@@ -56,6 +56,8 @@
 41n. When a speech transcript is available, image boundaries and captions share one transcript-aligned timeline; captions retain the approved script wording, and estimated chunk timing is used only as a fallback.
 41o. Paid story images are distributed across the full narration; each image must match the first spoken moment of its scene, and reuse is allowed only for an adjacent passage with the same subject, place, period, and visible action.
 41p. Approved narration outranks generic visual defaults for image content, while safety, native 16:9 output, and the selected illustrated medium remain fixed.
+41q. Generated videos are limited to 30 minutes across creator, administrator, database, and local-pipeline entry points; legacy custom limits are clamped once.
+41r. Production speed improvements must preserve every approval and quality stage; narration uses three resumable concurrent chunks, while existing bounded image and sound concurrency remains unchanged.
 41a. Every generated scene image and thumbnail uses a coherent animated storybook/cartoon medium; human characters must remain visibly illustrated and must never become photographs or live-action people.
 42. Paystack Checkout is the only browser-accessible path for purchasing paid access, and plan entitlements are never accepted from browser form or callback values.
 43. A paid plan becomes effective only after My Automation Studio verifies a successful Paystack transaction or accepts a correctly signed `charge.success` webhook.

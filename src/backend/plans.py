@@ -2,6 +2,8 @@
 
 from dataclasses import dataclass
 
+from production_limits import MAX_VIDEO_MINUTES
+
 
 @dataclass(frozen=True)
 class Plan:
@@ -38,7 +40,7 @@ PLANS = {
         "Make up to 30 videos in 30 days.",
     ),
     "studio": Plan(
-        "studio", "Studio", 80_000, 50, 100, 30, 48, 200,
+        "studio", "Studio", 80_000, 50, 100, MAX_VIDEO_MINUTES, 48, 200,
         "Make many long videos every month.",
         "Busy creators who need several videos each day.",
         "Make up to 100 videos in 30 days.",
